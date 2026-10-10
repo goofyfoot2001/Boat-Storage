@@ -1,0 +1,15 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# Public Supabase settings, baked into the site at build time. The publishable key is
+# designed to be public; Row Level Security protects the data. Never add the secret key here.
+[build.environment]
+  VITE_SUPABASE_URL = "https://yhaudcfqxjpnxclkecdm.supabase.co"
+  VITE_SUPABASE_PUBLISHABLE_KEY = "sb_publishable_BFCCcGzfF2Qh10A5ZV5nBg_HW-wAtbo"
+
+# Send every page address to the app so links like /boats/123 work when opened directly.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
