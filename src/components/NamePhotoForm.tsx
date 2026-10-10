@@ -1,8 +1,7 @@
-import { useRef, useState, type FormEvent } from "react";
-import { shrinkImage } from "../lib/image";
+import { useState, type FormEvent } from "react";
 import { Icon } from "./Icon";
+import { PhotoField } from "./PhotoField";
 import { Sheet } from "./Sheet";
-import { usePhotoUrl } from "./usePhotoUrl";
 
 interface Props {
   title: string;
@@ -19,25 +18,11 @@ interface Props {
 }
 
 /** Add/edit form for a boat or deck: a name and an optional picture. */
-export function ItemForm(p: Props) {
+export function NamePhotoForm(p: Props) {
   const [name, setName] = useState(p.initialName ?? "");
-  // undefined = unchanged, null = removed, Blob = newly picked
   const [photo, setPhoto] = useState<Blob | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-
-  const preview = usePhotoUrl(photo === undefined ? p.initialPhotoPath : photo);
-
-  async function pick(file: File | undefined) {
-    if (!file) return;
-    setError("");
-    try {
-      setPhoto(await shrinkImage(file));
-    } catch {
-      setError("That file couldn't be opened as a picture.");
-    }
-  }
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -61,26 +46,8 @@ export function ItemForm(p: Props) {
             autoFocus maxLength={60} enterKeyHint="done" />
         </label>
 
-        <div className="field">
-          <span>{p.photoLabel} <em>(optional)</em></span>
-          {preview ? (
-            <div className="photo-preview">
-              <img src={preview} alt="" />
-              <div className="photo-preview-actions">
-                <button type="button" className="btn small" onClick={() => fileRef.current?.click()}>Change</button>
-                <button type="button" className="btn small danger-outline" onClick={() => setPhoto(null)}>Remove</button>
-              </div>
-            </div>
-          ) : (
-            <button type="button" className="photo-drop" onClick={() => fileRef.current?.click()}>
-              <Icon name="camera" size={26} />
-              <strong>Add a picture</strong>
-              <small>{p.photoHint}</small>
-            </button>
-          )}
-          <input ref={fileRef} type="file" accept="image/*" hidden
-            onChange={e => { pick(e.target.files?.[0]); e.target.value = ""; }} />
-        </div>
+        <PhotoField label={p.photoLabel} hint={p.photoHint} savedPath={p.initialPhotoPath}
+          value={photo} onChange={v => { setPhoto(v); setError(""); }} onError={setError} />
 
         {error && <p className="error">{error}</p>}
 

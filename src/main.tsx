@@ -5,6 +5,7 @@ import { AuthProvider, useAuth } from "./auth";
 import { BoatDecks } from "./pages/BoatDecks";
 import { Boats } from "./pages/Boats";
 import { DeckPlan } from "./pages/DeckPlan";
+import { LocationPage } from "./pages/LocationPage";
 import { Login } from "./pages/Login";
 import "./styles.css";
 
@@ -16,6 +17,7 @@ function App() {
       <Route path="/" element={<Boats />} />
       <Route path="/boats/:boatId" element={<BoatDecks />} />
       <Route path="/decks/:deckId" element={<DeckPlan />} />
+      <Route path="/locations/:locationId" element={<LocationPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   );

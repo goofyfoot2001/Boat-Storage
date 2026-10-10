@@ -1,7 +1,7 @@
 // Everything the screens need to read and change data goes through here.
 // Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
 import { supabase } from "./supabase";
-import type { Boat, Deck } from "./types";
+import type { Boat, Deck, Item, Location } from "./types";
 
 const PHOTOS = "photos";
 
@@ -157,9 +157,92 @@ export async function reorderDecks(decks: Deck[]) {
   await Promise.all(decks.map((d, i) => supabase.from("decks").update({ sort_order: i }).eq("id", d.id)));
 }
 
+/** Photos of every location and item on these decks, so they can be cleared out of storage. */
 async function itemPhotoPaths(deckIds: string[]) {
   if (!deckIds.length) return [];
-  const rows = check(await supabase.from("items").select("photo_path, locations!inner(deck_id)")
-    .in("locations.deck_id", deckIds).not("photo_path", "is", null)) as { photo_path: string }[];
-  return rows.map(r => r.photo_path);
+  const rows = check(await supabase.from("locations").select("photo_path, items(photo_path)")
+    .in("deck_id", deckIds)) as { photo_path: string | null; items: { photo_path: string | null }[] }[];
+  return rows.flatMap(r => [r.photo_path, ...r.items.map(i => i.photo_path)]);
+}
+
+// ── Storage locations ───────────────────────────────────────────────────────
+
+interface LocationRow {
+  id: string; user_id: string; deck_id: string; name: string; x: number; y: number; color: string;
+  photo_path: string | null; items?: { count: number }[];
+}
+const toLocation = (r: LocationRow): Location => ({
+  id: r.id, userId: r.user_id, deckId: r.deck_id, name: r.name, x: r.x, y: r.y, color: r.color,
+  photoPath: r.photo_path, itemCount: r.items?.[0]?.count ?? 0,
+});
+
+export async function listLocations(deckId: string) {
+  const rows = check(await supabase.from("locations").select("*, items(count)").eq("deck_id", deckId).order("name"));
+  return (rows as LocationRow[]).map(toLocation);
+}
+
+export async function getLocation(id: string) {
+  const row = check(await supabase.from("locations").select("*").eq("id", id).maybeSingle());
+  return row ? toLocation(row as LocationRow) : undefined;
+}
+
+export interface LocationFields { name: string; color: string }
+
+export async function addLocation(userId: string, deckId: string, x: number, y: number, f: LocationFields, photo: Blob | null) {
+  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+  const row = check(await supabase.from("locations")
+    .insert({ deck_id: deckId, x, y, name: f.name.trim(), color: f.color, photo_path }).select().single());
+  return toLocation(row as LocationRow);
+}
+
+export async function updateLocation(loc: Location, f: LocationFields, photo: Blob | null | undefined) {
+  const photo_path = await replacePhoto(loc.userId, loc.photoPath, photo);
+  check(await supabase.from("locations").update({ name: f.name.trim(), color: f.color, photo_path }).eq("id", loc.id));
+}
+
+export async function moveLocation(id: string, x: number, y: number) {
+  check(await supabase.from("locations").update({ x, y }).eq("id", id));
+}
+
+export async function deleteLocation(loc: Location) {
+  const items = await listItems(loc.id);
+  check(await supabase.from("locations").delete().eq("id", loc.id));
+  await removePhotos([loc.photoPath, ...items.map(i => i.photoPath)]);
+}
+
+// ── Stored items ────────────────────────────────────────────────────────────
+
+interface ItemRow {
+  id: string; user_id: string; location_id: string; name: string; quantity: number;
+  price: number | string | null; notes: string | null; photo_path: string | null;
+}
+const toItem = (r: ItemRow): Item => ({
+  id: r.id, userId: r.user_id, locationId: r.location_id, name: r.name, quantity: r.quantity,
+  price: r.price === null ? null : Number(r.price), notes: r.notes ?? "", photoPath: r.photo_path,
+});
+
+export async function listItems(locationId: string) {
+  const rows = check(await supabase.from("items").select("*").eq("location_id", locationId).order("name"));
+  return (rows as ItemRow[]).map(toItem);
+}
+
+export interface ItemFields { name: string; quantity: number; price: number | null; notes: string }
+
+const itemColumns = (f: ItemFields) => ({
+  name: f.name.trim(), quantity: f.quantity, price: f.price, notes: f.notes.trim() || null,
+});
+
+export async function addItem(userId: string, locationId: string, f: ItemFields, photo: Blob | null) {
+  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+  check(await supabase.from("items").insert({ location_id: locationId, ...itemColumns(f), photo_path }));
+}
+
+export async function updateItem(item: Item, f: ItemFields, photo: Blob | null | undefined) {
+  const photo_path = await replacePhoto(item.userId, item.photoPath, photo);
+  check(await supabase.from("items").update({ ...itemColumns(f), photo_path }).eq("id", item.id));
+}
+
+export async function deleteItem(item: Item) {
+  check(await supabase.from("items").delete().eq("id", item.id));
+  await removePhotos([item.photoPath]);
 }

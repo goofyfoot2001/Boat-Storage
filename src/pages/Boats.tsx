@@ -4,7 +4,7 @@ import { useAuth, useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
-import { ItemForm } from "../components/ItemForm";
+import { NamePhotoForm } from "../components/NamePhotoForm";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat } from "../data/types";
@@ -79,14 +79,14 @@ export function Boats() {
       </footer>
 
       {adding && (
-        <ItemForm title="Add a boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
+        <NamePhotoForm title="Add a boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Add boat"
           onSubmit={async (name, photo) => { await store.addBoat(userId, name, photo ?? null, boats?.length ?? 0); await load(); }}
           onClose={() => setAdding(false)} />
       )}
 
       {editing && (
-        <ItemForm title="Edit boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
+        <NamePhotoForm title="Edit boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Save changes"
           initialName={editing.name} initialPhotoPath={editing.photoPath}
           onSubmit={async (name, photo) => { await store.updateBoat(editing, name, photo); await load(); }}

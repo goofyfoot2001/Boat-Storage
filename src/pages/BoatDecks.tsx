@@ -4,7 +4,7 @@ import { useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
-import { ItemForm } from "../components/ItemForm";
+import { NamePhotoForm } from "../components/NamePhotoForm";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat, Deck } from "../data/types";
@@ -92,13 +92,13 @@ export function BoatDecks() {
       </section>
 
       {adding && (
-        <ItemForm title="Add a deck" {...DECK_FORM} submitLabel="Add deck"
+        <NamePhotoForm title="Add a deck" {...DECK_FORM} submitLabel="Add deck"
           onSubmit={async (name, photo) => { await store.addDeck(userId, boat.id, name, photo ?? null, decks.length); await load(); }}
           onClose={() => setAdding(false)} />
       )}
 
       {editing && (
-        <ItemForm title="Edit deck" {...DECK_FORM} submitLabel="Save changes"
+        <NamePhotoForm title="Edit deck" {...DECK_FORM} submitLabel="Save changes"
           initialName={editing.name} initialPhotoPath={editing.photoPath}
           onSubmit={async (name, photo) => { await store.updateDeck(editing, name, photo); await load(); }}
           onDelete={() => { setDeleting(editing); setEditing(null); }}
@@ -114,7 +114,7 @@ export function BoatDecks() {
       )}
 
       {editingBoat && (
-        <ItemForm title="Edit boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
+        <NamePhotoForm title="Edit boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Save changes"
           initialName={boat.name} initialPhotoPath={boat.photoPath}
           onSubmit={async (name, photo) => { await store.updateBoat(boat, name, photo); await load(); }}
