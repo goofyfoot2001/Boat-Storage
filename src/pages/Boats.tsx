@@ -21,10 +21,9 @@ export function Boats() {
   const [reordering, setReordering] = useState(false);
 
   const load = useCallback(async () => {
-    const list = await store.listBoats(userId);
-    const counts = await Promise.all(list.map(b => store.listDecks(userId, b.id).then(d => [b.id, d.length])));
+    const [list, counts] = await Promise.all([store.listBoats(), store.deckCounts()]);
     setBoats(list);
-    setDeckCounts(Object.fromEntries(counts));
+    setDeckCounts(counts);
   }, [userId]);
 
   useEffect(() => { load(); }, [load]);
@@ -82,14 +81,14 @@ export function Boats() {
       {adding && (
         <ItemForm title="Add a boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Add boat"
-          onSubmit={async (name, photo) => { await store.addBoat(userId, name, photo ?? null); await load(); }}
+          onSubmit={async (name, photo) => { await store.addBoat(userId, name, photo ?? null, boats?.length ?? 0); await load(); }}
           onClose={() => setAdding(false)} />
       )}
 
       {editing && (
         <ItemForm title="Edit boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Save changes"
-          initialName={editing.name} initialPhotoId={editing.photoId}
+          initialName={editing.name} initialPhotoPath={editing.photoPath}
           onSubmit={async (name, photo) => { await store.updateBoat(editing, name, photo); await load(); }}
           onDelete={() => { setDeleting(editing); setEditing(null); }}
           onClose={() => setEditing(null)} />
@@ -116,7 +115,7 @@ function BoatCard({ boat, deckCount, reordering, isFirst, isLast, onEdit, onMove
   onEdit: () => void;
   onMove: (by: -1 | 1) => void;
 }) {
-  const photo = usePhotoUrl(boat.photoId);
+  const photo = usePhotoUrl(boat.photoPath);
   const body = (
     <>
       <div className="thumb boat-thumb">

@@ -9,6 +9,7 @@ export function Login() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sentTo, setSentTo] = useState("");
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -19,11 +20,30 @@ export function Login() {
     }
     setBusy(true);
     try {
-      await (mode === "in" ? signIn(email, password) : signUp(email, password));
+      if (mode === "in") await signIn(email, password);
+      else if ((await signUp(email, password)).needsConfirmation) {
+        setSentTo(email.trim());
+        setBusy(false);
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
       setBusy(false);
     }
+  }
+
+  if (sentTo) {
+    return (
+      <main className="login">
+        <img className="login-logo" src="/logo.png" alt="" />
+        <div className="card form" style={{ marginTop: 28 }}>
+          <h2>Check your email</h2>
+          <p>We sent a confirmation link to <strong>{sentTo}</strong>. Tap it to finish creating your account, then sign in.</p>
+          <button className="btn primary block" onClick={() => { setSentTo(""); setMode("in"); setPassword(""); setConfirm(""); }}>
+            Back to sign in
+          </button>
+        </div>
+      </main>
+    );
   }
 
   return (

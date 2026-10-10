@@ -1,19 +1,19 @@
 import { useEffect, useState } from "react";
-import { getPhoto } from "../data/store";
+import { photoUrl } from "../data/store";
 
-/** Turns a saved photo id (or a not-yet-saved Blob) into something an <img> can show. */
+/** Turns a saved photo path (or a not-yet-saved Blob) into something an <img> can show. */
 export function usePhotoUrl(source: string | Blob | null | undefined) {
   const [url, setUrl] = useState<string | null>(null);
   useEffect(() => {
     let objectUrl: string | null = null;
     let cancelled = false;
     setUrl(null);
-    (async () => {
-      const blob = typeof source === "string" ? await getPhoto(source) : source;
-      if (!blob || cancelled) return;
-      objectUrl = URL.createObjectURL(blob);
+    if (source instanceof Blob) {
+      objectUrl = URL.createObjectURL(source);
       setUrl(objectUrl);
-    })();
+    } else if (source) {
+      photoUrl(source).then(u => !cancelled && setUrl(u), () => {});
+    }
     return () => {
       cancelled = true;
       if (objectUrl) URL.revokeObjectURL(objectUrl);

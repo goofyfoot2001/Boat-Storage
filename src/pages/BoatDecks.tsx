@@ -31,9 +31,9 @@ export function BoatDecks() {
   const [reordering, setReordering] = useState(false);
 
   const load = useCallback(async () => {
-    const b = await store.getBoat(userId, boatId!);
+    const b = await store.getBoat(boatId!);
     setBoat(b ?? null);
-    if (b) setDecks(await store.listDecks(userId, b.id));
+    if (b) setDecks(await store.listDecks(b.id));
   }, [userId, boatId]);
 
   useEffect(() => { load(); }, [load]);
@@ -93,13 +93,13 @@ export function BoatDecks() {
 
       {adding && (
         <ItemForm title="Add a deck" {...DECK_FORM} submitLabel="Add deck"
-          onSubmit={async (name, photo) => { await store.addDeck(userId, boat.id, name, photo ?? null); await load(); }}
+          onSubmit={async (name, photo) => { await store.addDeck(userId, boat.id, name, photo ?? null, decks.length); await load(); }}
           onClose={() => setAdding(false)} />
       )}
 
       {editing && (
         <ItemForm title="Edit deck" {...DECK_FORM} submitLabel="Save changes"
-          initialName={editing.name} initialPhotoId={editing.photoId}
+          initialName={editing.name} initialPhotoPath={editing.photoPath}
           onSubmit={async (name, photo) => { await store.updateDeck(editing, name, photo); await load(); }}
           onDelete={() => { setDeleting(editing); setEditing(null); }}
           onClose={() => setEditing(null)} />
@@ -116,7 +116,7 @@ export function BoatDecks() {
       {editingBoat && (
         <ItemForm title="Edit boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Save changes"
-          initialName={boat.name} initialPhotoId={boat.photoId}
+          initialName={boat.name} initialPhotoPath={boat.photoPath}
           onSubmit={async (name, photo) => { await store.updateBoat(boat, name, photo); await load(); }}
           onDelete={() => { setDeletingBoat(true); setEditingBoat(false); }}
           onClose={() => setEditingBoat(false)} />
@@ -142,7 +142,7 @@ function DeckCard({ deck, reordering, isFirst, isLast, onEdit, onMove }: {
   onEdit: () => void;
   onMove: (by: -1 | 1) => void;
 }) {
-  const photo = usePhotoUrl(deck.photoId);
+  const photo = usePhotoUrl(deck.photoPath);
   const picture = (
     <div className="deck-picture">
       {photo ? <img src={photo} alt="" /> : (

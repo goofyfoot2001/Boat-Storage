@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { Navigate, useParams } from "react-router-dom";
-import { useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
 import { Icon } from "../components/Icon";
 import { ItemForm } from "../components/ItemForm";
@@ -11,17 +10,16 @@ import type { Boat, Deck } from "../data/types";
 /** The deck layout. Storage-location dots will be placed on this picture next. */
 export function DeckPlan() {
   const { deckId } = useParams();
-  const userId = useUserId();
   const [deck, setDeck] = useState<Deck | null | undefined>(undefined);
   const [boat, setBoat] = useState<Boat | undefined>();
   const [editing, setEditing] = useState(false);
-  const photo = usePhotoUrl(deck?.photoId);
+  const photo = usePhotoUrl(deck?.photoPath);
 
   const load = useCallback(async () => {
-    const d = await store.getDeck(userId, deckId!);
+    const d = await store.getDeck(deckId!);
     setDeck(d ?? null);
-    if (d) setBoat(await store.getBoat(userId, d.boatId));
-  }, [userId, deckId]);
+    if (d) setBoat(await store.getBoat(d.boatId));
+  }, [deckId]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -57,7 +55,7 @@ export function DeckPlan() {
       {editing && (
         <ItemForm title="Edit deck" nameLabel="Deck name" namePlaceholder="e.g. Main Deck"
           photoLabel="Deck layout" photoHint="The manufacturer's deck diagram works best"
-          submitLabel="Save changes" initialName={deck.name} initialPhotoId={deck.photoId}
+          submitLabel="Save changes" initialName={deck.name} initialPhotoPath={deck.photoPath}
           onSubmit={async (name, p) => { await store.updateDeck(deck, name, p); await load(); }}
           onClose={() => setEditing(false)} />
       )}

@@ -11,7 +11,7 @@ interface Props {
   photoLabel: string;
   photoHint: string;
   initialName?: string;
-  initialPhotoId?: string | null;
+  initialPhotoPath?: string | null;
   submitLabel: string;
   onSubmit: (name: string, photo: Blob | null | undefined) => Promise<void>;
   onClose: () => void;
@@ -27,7 +27,7 @@ export function ItemForm(p: Props) {
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
 
-  const preview = usePhotoUrl(photo === undefined ? p.initialPhotoId : photo);
+  const preview = usePhotoUrl(photo === undefined ? p.initialPhotoPath : photo);
 
   async function pick(file: File | undefined) {
     if (!file) return;

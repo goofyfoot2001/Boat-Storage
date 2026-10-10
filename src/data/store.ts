@@ -1,24 +1,13 @@
-// Everything the screens need to read and change data goes through here,
-// so swapping in the online database later only touches this file.
-import * as db from "./db";
-import type { Boat, Deck, Photo, User } from "./types";
+// Everything the screens need to read and change data goes through here.
+// Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
+import { supabase } from "./supabase";
+import type { Boat, Deck } from "./types";
 
-const SESSION_KEY = "bsm-session";
+const PHOTOS = "photos";
 
-const newId = () => crypto.randomUUID();
-
-function toHex(buf: ArrayBuffer) {
-  return [...new Uint8Array(buf)].map(b => b.toString(16).padStart(2, "0")).join("");
-}
-
-async function hashPassword(password: string, salt: string) {
-  const key = await crypto.subtle.importKey("raw", new TextEncoder().encode(password), "PBKDF2", false, ["deriveBits"]);
-  const bits = await crypto.subtle.deriveBits(
-    { name: "PBKDF2", salt: new TextEncoder().encode(salt), iterations: 210_000, hash: "SHA-256" },
-    key,
-    256,
-  );
-  return toHex(bits);
+function check<T>(res: { data: T; error: { message: string } | null }): T {
+  if (res.error) throw new Error(res.error.message);
+  return res.data;
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -28,151 +17,149 @@ export interface Session {
   email: string;
 }
 
-export function currentSession(): Session | null {
-  try {
-    const raw = localStorage.getItem(SESSION_KEY);
-    return raw ? (JSON.parse(raw) as Session) : null;
-  } catch {
-    return null;
-  }
+export async function signUp(email: string, password: string) {
+  const { data, error } = await supabase.auth.signUp({
+    email: email.trim(),
+    password,
+    options: { emailRedirectTo: window.location.origin },
+  });
+  if (error) throw new Error(error.message);
+  // No session means Supabase wants the email address confirmed first.
+  return { needsConfirmation: !data.session };
 }
 
-function saveSession(s: Session | null) {
-  try {
-    if (s) localStorage.setItem(SESSION_KEY, JSON.stringify(s));
-    else localStorage.removeItem(SESSION_KEY);
-  } catch {
-    // Private browsing can block storage; the user just stays signed in for this tab.
-  }
-}
-
-async function findUser(email: string) {
-  const [user] = await db.getBy<User>("users", "email", email);
-  return user;
-}
-
-export async function signUp(email: string, password: string): Promise<Session> {
-  email = email.trim().toLowerCase();
-  if (await findUser(email)) throw new Error("An account with that email already exists.");
-  const salt = toHex(crypto.getRandomValues(new Uint8Array(16)).buffer);
-  const user: User = { id: newId(), email, salt, hash: await hashPassword(password, salt), createdAt: Date.now() };
-  await db.put("users", user);
-  const session = { userId: user.id, email };
-  saveSession(session);
-  return session;
-}
-
-export async function signIn(email: string, password: string): Promise<Session> {
-  email = email.trim().toLowerCase();
-  const user = await findUser(email);
-  if (!user || (await hashPassword(password, user.salt)) !== user.hash) {
+export async function signIn(email: string, password: string) {
+  const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password });
+  if (error) {
+    if (/confirm/i.test(error.message)) throw new Error("Please confirm your email first. Check your inbox for the link.");
     throw new Error("Email or password is incorrect.");
   }
-  const session = { userId: user.id, email };
-  saveSession(session);
-  return session;
 }
 
-export function signOut() {
-  saveSession(null);
+export async function signOut() {
+  await supabase.auth.signOut();
 }
 
 // ── Photos ──────────────────────────────────────────────────────────────────
 
-export async function getPhoto(id: string) {
-  return (await db.get<Photo>("photos", id))?.blob;
+const urlCache = new Map<string, { url: string; expires: number }>();
+
+/** Photos are private, so each one is shown through a short-lived signed link. */
+export async function photoUrl(path: string) {
+  const hit = urlCache.get(path);
+  if (hit && hit.expires > Date.now()) return hit.url;
+  const signedUrl = check(await supabase.storage.from(PHOTOS).createSignedUrl(path, 3600))!.signedUrl;
+  urlCache.set(path, { url: signedUrl, expires: Date.now() + 50 * 60_000 });
+  return signedUrl;
 }
 
-async function savePhoto(blob: Blob) {
-  const id = newId();
-  await db.put<Photo>("photos", { id, blob });
-  return id;
+async function uploadPhoto(userId: string, blob: Blob) {
+  const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
+  const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+  check(await supabase.storage.from(PHOTOS).upload(path, blob, { contentType: blob.type || "image/jpeg" }));
+  return path;
+}
+
+async function removePhotos(paths: (string | null)[]) {
+  const real = paths.filter((p): p is string => !!p);
+  if (real.length) await supabase.storage.from(PHOTOS).remove(real);
+  real.forEach(p => urlCache.delete(p));
 }
 
 /** photo: a new Blob replaces the old one, null removes it, undefined leaves it alone. */
-async function updatePhoto(oldId: string | null, photo: Blob | null | undefined) {
-  if (photo === undefined) return oldId;
-  if (oldId) await db.del("photos", oldId);
-  return photo ? savePhoto(photo) : null;
+async function replacePhoto(userId: string, oldPath: string | null, photo: Blob | null | undefined) {
+  if (photo === undefined) return oldPath;
+  const next = photo ? await uploadPhoto(userId, photo) : null;
+  await removePhotos([oldPath]);
+  return next;
 }
 
 // ── Boats ───────────────────────────────────────────────────────────────────
 
-const bySortOrder = <T extends { sortOrder: number; createdAt: number }>(a: T, b: T) =>
-  a.sortOrder - b.sortOrder || a.createdAt - b.createdAt;
+interface BoatRow { id: string; user_id: string; name: string; photo_path: string | null; sort_order: number }
+const toBoat = (r: BoatRow): Boat => ({ id: r.id, userId: r.user_id, name: r.name, photoPath: r.photo_path, sortOrder: r.sort_order });
 
-export async function listBoats(userId: string) {
-  return (await db.getBy<Boat>("boats", "userId", userId)).sort(bySortOrder);
+export async function listBoats() {
+  const rows = check(await supabase.from("boats").select("*").order("sort_order").order("created_at"));
+  return (rows as BoatRow[]).map(toBoat);
 }
 
-export async function getBoat(userId: string, id: string) {
-  const boat = await db.get<Boat>("boats", id);
-  return boat?.userId === userId ? boat : undefined;
+/** Number of decks on each boat, keyed by boat id. */
+export async function deckCounts() {
+  const rows = check(await supabase.from("decks").select("boat_id")) as { boat_id: string }[];
+  const counts: Record<string, number> = {};
+  for (const r of rows) counts[r.boat_id] = (counts[r.boat_id] ?? 0) + 1;
+  return counts;
 }
 
-export async function addBoat(userId: string, name: string, photo: Blob | null) {
-  const existing = await listBoats(userId);
-  const boat: Boat = {
-    id: newId(),
-    userId,
-    name: name.trim(),
-    photoId: photo ? await savePhoto(photo) : null,
-    sortOrder: existing.length,
-    createdAt: Date.now(),
-  };
-  await db.put("boats", boat);
-  return boat;
+export async function getBoat(id: string) {
+  const row = check(await supabase.from("boats").select("*").eq("id", id).maybeSingle());
+  return row ? toBoat(row as BoatRow) : undefined;
+}
+
+export async function addBoat(userId: string, name: string, photo: Blob | null, sortOrder: number) {
+  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+  check(await supabase.from("boats").insert({ name: name.trim(), photo_path, sort_order: sortOrder }));
 }
 
 export async function updateBoat(boat: Boat, name: string, photo: Blob | null | undefined) {
-  await db.put<Boat>("boats", { ...boat, name: name.trim(), photoId: await updatePhoto(boat.photoId, photo) });
+  const photo_path = await replacePhoto(boat.userId, boat.photoPath, photo);
+  check(await supabase.from("boats").update({ name: name.trim(), photo_path }).eq("id", boat.id));
 }
 
 export async function deleteBoat(boat: Boat) {
-  for (const deck of await listDecks(boat.userId, boat.id)) await deleteDeck(deck);
-  if (boat.photoId) await db.del("photos", boat.photoId);
-  await db.del("boats", boat.id);
+  // The database removes the boat's decks, locations and items on its own;
+  // their photos have to be cleared out of storage separately.
+  const decks = check(await supabase.from("decks").select("id, photo_path").eq("boat_id", boat.id)) as { id: string; photo_path: string | null }[];
+  const itemPhotos = await itemPhotoPaths(decks.map(d => d.id));
+  check(await supabase.from("boats").delete().eq("id", boat.id));
+  await removePhotos([boat.photoPath, ...decks.map(d => d.photo_path), ...itemPhotos]);
 }
 
 export async function reorderBoats(boats: Boat[]) {
-  await Promise.all(boats.map((b, i) => db.put<Boat>("boats", { ...b, sortOrder: i })));
+  await Promise.all(boats.map((b, i) => supabase.from("boats").update({ sort_order: i }).eq("id", b.id)));
 }
 
 // ── Decks ───────────────────────────────────────────────────────────────────
 
-export async function listDecks(userId: string, boatId: string) {
-  return (await db.getBy<Deck>("decks", "boatId", boatId)).filter(d => d.userId === userId).sort(bySortOrder);
+interface DeckRow { id: string; user_id: string; boat_id: string; name: string; photo_path: string | null; sort_order: number }
+const toDeck = (r: DeckRow): Deck => ({
+  id: r.id, userId: r.user_id, boatId: r.boat_id, name: r.name, photoPath: r.photo_path, sortOrder: r.sort_order,
+});
+
+export async function listDecks(boatId: string) {
+  const rows = check(await supabase.from("decks").select("*").eq("boat_id", boatId).order("sort_order").order("created_at"));
+  return (rows as DeckRow[]).map(toDeck);
 }
 
-export async function getDeck(userId: string, id: string) {
-  const deck = await db.get<Deck>("decks", id);
-  return deck?.userId === userId ? deck : undefined;
+export async function getDeck(id: string) {
+  const row = check(await supabase.from("decks").select("*").eq("id", id).maybeSingle());
+  return row ? toDeck(row as DeckRow) : undefined;
 }
 
-export async function addDeck(userId: string, boatId: string, name: string, photo: Blob | null) {
-  const existing = await listDecks(userId, boatId);
-  const deck: Deck = {
-    id: newId(),
-    userId,
-    boatId,
-    name: name.trim(),
-    photoId: photo ? await savePhoto(photo) : null,
-    sortOrder: existing.length,
-    createdAt: Date.now(),
-  };
-  await db.put("decks", deck);
-  return deck;
+export async function addDeck(userId: string, boatId: string, name: string, photo: Blob | null, sortOrder: number) {
+  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+  check(await supabase.from("decks").insert({ boat_id: boatId, name: name.trim(), photo_path, sort_order: sortOrder }));
 }
 
 export async function updateDeck(deck: Deck, name: string, photo: Blob | null | undefined) {
-  await db.put<Deck>("decks", { ...deck, name: name.trim(), photoId: await updatePhoto(deck.photoId, photo) });
+  const photo_path = await replacePhoto(deck.userId, deck.photoPath, photo);
+  check(await supabase.from("decks").update({ name: name.trim(), photo_path }).eq("id", deck.id));
 }
 
 export async function deleteDeck(deck: Deck) {
-  if (deck.photoId) await db.del("photos", deck.photoId);
-  await db.del("decks", deck.id);
+  const itemPhotos = await itemPhotoPaths([deck.id]);
+  check(await supabase.from("decks").delete().eq("id", deck.id));
+  await removePhotos([deck.photoPath, ...itemPhotos]);
 }
 
 export async function reorderDecks(decks: Deck[]) {
-  await Promise.all(decks.map((d, i) => db.put<Deck>("decks", { ...d, sortOrder: i })));
+  await Promise.all(decks.map((d, i) => supabase.from("decks").update({ sort_order: i }).eq("id", d.id)));
+}
+
+async function itemPhotoPaths(deckIds: string[]) {
+  if (!deckIds.length) return [];
+  const rows = check(await supabase.from("items").select("photo_path, locations!inner(deck_id)")
+    .in("locations.deck_id", deckIds).not("photo_path", "is", null)) as { photo_path: string }[];
+  return rows.map(r => r.photo_path);
 }

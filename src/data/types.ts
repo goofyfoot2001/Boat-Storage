@@ -1,18 +1,9 @@
-export interface User {
-  id: string;
-  email: string;
-  salt: string;
-  hash: string;
-  createdAt: number;
-}
-
 export interface Boat {
   id: string;
   userId: string;
   name: string;
-  photoId: string | null;
+  photoPath: string | null;
   sortOrder: number;
-  createdAt: number;
 }
 
 export interface Deck {
@@ -20,12 +11,6 @@ export interface Deck {
   userId: string;
   boatId: string;
   name: string;
-  photoId: string | null;
+  photoPath: string | null;
   sortOrder: number;
-  createdAt: number;
-}
-
-export interface Photo {
-  id: string;
-  blob: Blob;
 }
