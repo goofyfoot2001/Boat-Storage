@@ -18,7 +18,7 @@ export function AppHeader({ backTo, title, subtitle, right }: Props) {
           <Icon name="chevron-left" size={26} />
         </button>
       ) : (
-        <img className="logo" src="/logo.png" alt="" />
+        <img className="logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" />
       )}
       <div className="header-text">
         <h1>{title ?? "Boat Storage Manager"}</h1>

@@ -34,7 +34,7 @@ export function Login() {
   if (sentTo) {
     return (
       <main className="login">
-        <img className="login-logo" src="/logo.png" alt="" />
+        <img className="login-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" />
         <div className="card form" style={{ marginTop: 28 }}>
           <h2>Check your email</h2>
           <p>We sent a confirmation link to <strong>{sentTo}</strong>. Tap it to finish creating your account, then sign in.</p>
@@ -48,7 +48,7 @@ export function Login() {
 
   return (
     <main className="login">
-      <img className="login-logo" src="/logo.png" alt="" />
+      <img className="login-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" />
       <h1>Boat Storage Manager</h1>
       <p className="tagline">Where the float is my stuff!</p>
 
