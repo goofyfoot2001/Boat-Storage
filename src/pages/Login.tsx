@@ -1,10 +1,14 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { useAuth } from "../auth";
 
-export function Login() {
+/**
+ * Sign in / create account. From an invite link the email is filled in (and locked, since the
+ * invite only works for that address) and `notice` explains what they're joining.
+ */
+export function Login({ initialEmail = "", lockEmail = false, notice }: { initialEmail?: string; lockEmail?: boolean; notice?: ReactNode } = {}) {
   const { signIn, signUp } = useAuth();
   const [mode, setMode] = useState<"in" | "up">("in");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(initialEmail);
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
@@ -53,10 +57,12 @@ export function Login() {
       <p className="tagline">Where the float is my stuff!</p>
 
       <form className="form card" onSubmit={submit}>
+        {notice}
         <h2>{mode === "in" ? "Sign in" : "Create your account"}</h2>
         <label className="field">
           <span>Email</span>
-          <input type="email" autoComplete="email" required value={email} onChange={e => setEmail(e.target.value)} />
+          <input type="email" autoComplete="email" required value={email} readOnly={lockEmail}
+            onChange={e => setEmail(e.target.value)} />
         </label>
         <label className="field">
           <span>Password</span>

@@ -1,16 +1,24 @@
 import { useState, type FormEvent } from "react";
 import type { ItemFields } from "../data/store";
 import type { Item } from "../data/types";
+import { formatPrice } from "../lib/format";
 import { targetValue, type Target } from "../lib/places";
 import { DocumentsField } from "./DocumentsField";
 import { Icon } from "./Icon";
+import { Linkify } from "./Linkify";
+import { usePhotoUrl } from "./usePhotoUrl";
 import { PhotoField } from "./PhotoField";
 import { PlaceSelect } from "./PlaceSelect";
 import { Sheet } from "./Sheet";
 
 /** Add/edit something stored at a location or in a container. */
-export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClose, onDelete, onDocsChanged }: {
+export function StoredItemForm({ boatId, item, insideName, targets = [], onSubmit, onClose, onDelete, onDocsChanged, readOnly, addedBy }: {
+  boatId: string;
   item?: Item;
+  /** View-only crew: show the details without editing. */
+  readOnly?: boolean;
+  /** Who added this item, when it was someone else. */
+  addedBy?: string;
   /** Where a new item is being added, e.g. "Red tote". */
   insideName?: string;
   /** Locations and containers on this boat the item can be moved to (editing only). */
@@ -54,9 +62,27 @@ export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClo
     }
   }
 
+  if (readOnly && item) {
+    return (
+      <Sheet title={item.name} onClose={onClose}>
+        <div className="form item-view">
+          <ItemViewPhoto path={item.photoPath} />
+          <p className="item-meta">
+            <span className="qty">Qty {item.quantity}</span>
+            {item.price != null && <span>{formatPrice(item.price)} each</span>}
+          </p>
+          {item.notes && <p className="item-view-notes"><Linkify text={item.notes} /></p>}
+          <DocumentsField boatId={boatId} itemId={item.id} queued={[]} onQueue={() => {}} readOnly />
+          {addedBy && <p className="muted">Added by {addedBy}</p>}
+        </div>
+      </Sheet>
+    );
+  }
+
   return (
     <Sheet title={item ? "Edit item" : "Add item"} onClose={onClose}>
       <form onSubmit={submit} className="form">
+        {addedBy && <p className="muted">Added by {addedBy}</p>}
         {insideName && <p className="hint"><Icon name="box" size={14} /> Goes in {insideName}</p>}
         <label className="field">
           <span>What is it?</span>
@@ -90,7 +116,7 @@ export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClo
           <small className="field-hint">Web links you paste here become tappable.</small>
         </label>
 
-        <DocumentsField itemId={item?.id} queued={newDocs} onQueue={setNewDocs} onChanged={onDocsChanged} />
+        <DocumentsField boatId={boatId} itemId={item?.id} queued={newDocs} onQueue={setNewDocs} onChanged={onDocsChanged} />
 
         {item && targets.length > 1 && (
           <PlaceSelect label="Stored in" targets={targets} value={place} onChange={setPlace}
@@ -109,4 +135,9 @@ export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClo
       </form>
     </Sheet>
   );
+}
+
+function ItemViewPhoto({ path }: { path: string | null }) {
+  const url = usePhotoUrl(path);
+  return url ? <img className="item-view-photo" src={url} alt="" /> : null;
 }

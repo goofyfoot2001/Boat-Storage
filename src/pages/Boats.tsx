@@ -19,19 +19,40 @@ export function Boats() {
   const [editing, setEditing] = useState<Boat | null>(null);
   const [deleting, setDeleting] = useState<Boat | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [roles, setRoles] = useState<Record<string, store.BoatRole>>({});
+  const [invites, setInvites] = useState<Awaited<ReturnType<typeof store.myInvites>>>([]);
+  const [inviteError, setInviteError] = useState("");
 
   const load = useCallback(async () => {
-    const [list, counts] = await Promise.all([store.listBoats(), store.deckCounts()]);
+    const [list, counts, mine, waiting] = await Promise.all([
+      store.listBoats(), store.deckCounts(), store.myRoles(userId), store.myInvites(session?.email ?? "").catch(() => []),
+    ]);
     setBoats(list);
     setDeckCounts(counts);
-  }, [userId]);
+    setRoles(mine);
+    setInvites(waiting.filter(w => w.info?.status === "pending"));
+  }, [userId, session?.email]);
 
   useEffect(() => { load(); }, [load]);
 
+  // Your own boats first (you can reorder those); boats others shared with you after.
+  const owned = boats?.filter(b => roles[b.id] === "owner") ?? [];
+  const shared = boats?.filter(b => roles[b.id] && roles[b.id] !== "owner") ?? [];
+
   async function reorder(index: number, by: -1 | 1) {
-    const next = move(boats!, index, by);
-    setBoats(next);
+    const next = move(owned, index, by);
+    setBoats([...next, ...shared]);
     await store.reorderBoats(next);
+  }
+
+  async function join(token: string) {
+    setInviteError("");
+    try {
+      await store.acceptInvite(token);
+      await load();
+    } catch (err) {
+      setInviteError(err instanceof Error ? err.message : "Couldn't accept the invite.");
+    }
   }
 
   return (
@@ -41,7 +62,7 @@ export function Boats() {
           <button className="btn primary small" onClick={() => setReordering(false)}>Done</button>
         ) : (
           <>
-            {boats && boats.length > 1 && (
+            {owned.length > 1 && (
               <button className="icon-btn" onClick={() => setReordering(true)} aria-label="Reorder boats">
                 <Icon name="chevron-down" size={18} />
               </button>
@@ -54,23 +75,54 @@ export function Boats() {
       />
 
       <section className="list">
+        {invites.length > 0 && !reordering && (
+          <>
+            <h2 className="section-title">Invitations</h2>
+            {invites.map(({ invite, info }) => (
+              <div key={invite.id} className="card invite-card">
+                <Icon name="users" size={22} />
+                <p className="grow">
+                  {info?.invitedBy ? <><strong>{info.invitedBy}</strong> invited you to </> : "You're invited to "}
+                  <strong>{info?.boatName}</strong> as {invite.role === "crew" ? "crew" : "a viewer"}.
+                </p>
+                <div className="row">
+                  <button className="btn small" onClick={async () => { await store.declineInvite(invite.id); await load(); }}>Decline</button>
+                  <button className="btn primary small" onClick={() => join(invite.token)}>Join</button>
+                </div>
+              </div>
+            ))}
+            {inviteError && <p className="error">{inviteError}</p>}
+          </>
+        )}
+
         <h2 className="section-title">My Boats</h2>
         {reordering && <p className="hint">Use the arrows to change the order, then tap Done.</p>}
 
-        {boats?.length === 0 && (
+        {boats && owned.length === 0 && (
           <div className="empty">
             <Icon name="anchor" size={48} />
-            <h3>No boats yet</h3>
+            <h3>No boats of your own yet</h3>
             <p>Add your first boat to start mapping where everything is stored.</p>
             <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={18} /> Add a boat</button>
           </div>
         )}
 
-        {boats?.map((boat, i) => (
+        {owned.map((boat, i) => (
           <BoatCard key={boat.id} boat={boat} deckCount={deckCounts[boat.id] ?? 0}
-            reordering={reordering} isFirst={i === 0} isLast={i === boats.length - 1}
+            reordering={reordering} isFirst={i === 0} isLast={i === owned.length - 1}
             onEdit={() => setEditing(boat)} onMove={by => reorder(i, by)} />
         ))}
+
+        {shared.length > 0 && !reordering && (
+          <>
+            <h2 className="section-title">Shared with me</h2>
+            {shared.map(boat => (
+              <BoatCard key={boat.id} boat={boat} deckCount={deckCounts[boat.id] ?? 0}
+                badge={roles[boat.id] === "crew" ? "Crew" : "View only"}
+                reordering={false} isFirst isLast onMove={() => {}} />
+            ))}
+          </>
+        )}
       </section>
 
       <footer className="account">
@@ -82,7 +134,7 @@ export function Boats() {
       {adding && (
         <NamePhotoForm title="Add a boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Add boat"
-          onSubmit={async (name, photo) => { await store.addBoat(userId, name, photo ?? null, boats?.length ?? 0); await load(); }}
+          onSubmit={async (name, photo) => { await store.addBoat(name, photo ?? null, boats?.length ?? 0); await load(); }}
           onClose={() => setAdding(false)} />
       )}
 
@@ -107,13 +159,16 @@ export function Boats() {
   );
 }
 
-function BoatCard({ boat, deckCount, reordering, isFirst, isLast, onEdit, onMove }: {
+function BoatCard({ boat, deckCount, badge, reordering, isFirst, isLast, onEdit, onMove }: {
   boat: Boat;
   deckCount: number;
+  /** For boats shared with you: your role on it. */
+  badge?: string;
   reordering: boolean;
   isFirst: boolean;
   isLast: boolean;
-  onEdit: () => void;
+  /** Only the owner can edit a boat; left out for shared boats. */
+  onEdit?: () => void;
   onMove: (by: -1 | 1) => void;
 }) {
   const photo = usePhotoUrl(boat.photoPath);
@@ -124,7 +179,10 @@ function BoatCard({ boat, deckCount, reordering, isFirst, isLast, onEdit, onMove
       </div>
       <div className="card-text">
         <h3>{boat.name}</h3>
-        <p>{deckCount} deck{deckCount === 1 ? "" : "s"}</p>
+        <p>
+          {deckCount} deck{deckCount === 1 ? "" : "s"}
+          {badge && <span className="role-badge">{badge}</span>}
+        </p>
       </div>
     </>
   );
@@ -142,7 +200,7 @@ function BoatCard({ boat, deckCount, reordering, isFirst, isLast, onEdit, onMove
           <button className="icon-btn" disabled={isFirst} onClick={() => onMove(-1)} aria-label="Move up"><Icon name="chevron-up" size={18} /></button>
           <button className="icon-btn" disabled={isLast} onClick={() => onMove(1)} aria-label="Move down"><Icon name="chevron-down" size={18} /></button>
         </div>
-      ) : (
+      ) : onEdit && (
         <button className="card-edit" onClick={onEdit} aria-label={`Edit ${boat.name}`}><Icon name="edit" size={17} /></button>
       )}
     </div>

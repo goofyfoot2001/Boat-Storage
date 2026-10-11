@@ -53,9 +53,10 @@ export async function photoUrl(path: string) {
   return signedUrl;
 }
 
-async function uploadPhoto(userId: string, blob: Blob) {
+/** Files are kept per boat, so everyone on the boat can see them. */
+async function uploadPhoto(boatId: string, blob: Blob) {
   const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
-  const path = `${userId}/${crypto.randomUUID()}.${ext}`;
+  const path = `boats/${boatId}/${crypto.randomUUID()}.${ext}`;
   check(await supabase.storage.from(PHOTOS).upload(path, blob, { contentType: blob.type || "image/jpeg" }));
   return path;
 }
@@ -80,9 +81,9 @@ async function docPathsForItems(itemIds: string[]) {
 }
 
 /** photo: a new Blob replaces the old one, null removes it, undefined leaves it alone. */
-async function replacePhoto(userId: string, oldPath: string | null, photo: Blob | null | undefined) {
+async function replacePhoto(boatId: string, oldPath: string | null, photo: Blob | null | undefined) {
   if (photo === undefined) return oldPath;
-  const next = photo ? await uploadPhoto(userId, photo) : null;
+  const next = photo ? await uploadPhoto(boatId, photo) : null;
   await removePhotos([oldPath]);
   return next;
 }
@@ -110,13 +111,19 @@ export async function getBoat(id: string) {
   return row ? toBoat(row as BoatRow) : undefined;
 }
 
-export async function addBoat(userId: string, name: string, photo: Blob | null, sortOrder: number) {
-  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
-  check(await supabase.from("boats").insert({ name: name.trim(), photo_path, sort_order: sortOrder }));
+export async function addBoat(name: string, photo: Blob | null, sortOrder: number) {
+  // The id is made here so the photo can go straight into the new boat's folder. (The database makes
+  // the creator the owner as the boat is saved, which is what then allows the upload.)
+  const id = crypto.randomUUID();
+  check(await supabase.from("boats").insert({ id, name: name.trim(), sort_order: sortOrder }));
+  if (photo) {
+    const photo_path = await uploadPhoto(id, photo);
+    check(await supabase.from("boats").update({ photo_path }).eq("id", id));
+  }
 }
 
 export async function updateBoat(boat: Boat, name: string, photo: Blob | null | undefined) {
-  const photo_path = await replacePhoto(boat.userId, boat.photoPath, photo);
+  const photo_path = await replacePhoto(boat.id, boat.photoPath, photo);
   check(await supabase.from("boats").update({ name: name.trim(), photo_path }).eq("id", boat.id));
 }
 
@@ -152,13 +159,13 @@ export async function getDeck(id: string) {
   return row ? toDeck(row as DeckRow) : undefined;
 }
 
-export async function addDeck(userId: string, boatId: string, name: string, photo: Blob | null, sortOrder: number) {
-  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+export async function addDeck(boatId: string, name: string, photo: Blob | null, sortOrder: number) {
+  const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   check(await supabase.from("decks").insert({ boat_id: boatId, name: name.trim(), photo_path, sort_order: sortOrder }));
 }
 
 export async function updateDeck(deck: Deck, name: string, photo: Blob | null | undefined) {
-  const photo_path = await replacePhoto(deck.userId, deck.photoPath, photo);
+  const photo_path = await replacePhoto(deck.boatId, deck.photoPath, photo);
   check(await supabase.from("decks").update({ name: name.trim(), photo_path }).eq("id", deck.id));
 }
 
@@ -193,11 +200,11 @@ async function filesOnDecks(deckIds: string[]) {
 // ── Storage locations ───────────────────────────────────────────────────────
 
 interface LocationRow {
-  id: string; user_id: string; deck_id: string; name: string; x: number; y: number; color: string;
+  id: string; user_id: string; boat_id: string; deck_id: string; name: string; x: number; y: number; color: string;
   photo_path: string | null; items?: { count: number }[];
 }
 const toLocation = (r: LocationRow): Location => ({
-  id: r.id, userId: r.user_id, deckId: r.deck_id, name: r.name, x: r.x, y: r.y, color: r.color,
+  id: r.id, userId: r.user_id, boatId: r.boat_id, deckId: r.deck_id, name: r.name, x: r.x, y: r.y, color: r.color,
   photoPath: r.photo_path, itemCount: r.items?.[0]?.count ?? 0,
 });
 
@@ -213,15 +220,15 @@ export async function getLocation(id: string) {
 
 export interface LocationFields { name: string; color: string }
 
-export async function addLocation(userId: string, deckId: string, x: number, y: number, f: LocationFields, photo: Blob | null) {
-  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+export async function addLocation(boatId: string, deckId: string, x: number, y: number, f: LocationFields, photo: Blob | null) {
+  const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   const row = check(await supabase.from("locations")
     .insert({ deck_id: deckId, x, y, name: f.name.trim(), color: f.color, photo_path }).select().single());
   return toLocation(row as LocationRow);
 }
 
 export async function updateLocation(loc: Location, f: LocationFields, photo: Blob | null | undefined) {
-  const photo_path = await replacePhoto(loc.userId, loc.photoPath, photo);
+  const photo_path = await replacePhoto(loc.boatId, loc.photoPath, photo);
   check(await supabase.from("locations").update({ name: f.name.trim(), color: f.color, photo_path }).eq("id", loc.id));
 }
 
@@ -240,11 +247,11 @@ export async function deleteLocation(loc: Location) {
 // ── Containers ──────────────────────────────────────────────────────────────
 
 interface ContainerRow {
-  id: string; user_id: string; location_id: string; parent_id: string | null; name: string;
+  id: string; user_id: string; boat_id: string; location_id: string; parent_id: string | null; name: string;
   notes: string | null; color: string; photo_path: string | null;
 }
 const toContainer = (r: ContainerRow): Container => ({
-  id: r.id, userId: r.user_id, locationId: r.location_id, parentId: r.parent_id, name: r.name,
+  id: r.id, userId: r.user_id, boatId: r.boat_id, locationId: r.location_id, parentId: r.parent_id, name: r.name,
   notes: r.notes ?? "", color: r.color, photoPath: r.photo_path,
 });
 
@@ -257,13 +264,13 @@ export interface ContainerFields { name: string; notes: string; color: string }
 
 const containerColumns = (f: ContainerFields) => ({ name: f.name.trim(), notes: f.notes.trim() || null, color: f.color });
 
-export async function addContainer(userId: string, locationId: string, parentId: string | null, f: ContainerFields, photo: Blob | null) {
-  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+export async function addContainer(boatId: string, locationId: string, parentId: string | null, f: ContainerFields, photo: Blob | null) {
+  const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   check(await supabase.from("containers").insert({ location_id: locationId, parent_id: parentId, ...containerColumns(f), photo_path }));
 }
 
 export async function updateContainer(c: Container, f: ContainerFields, photo: Blob | null | undefined) {
-  const photo_path = await replacePhoto(c.userId, c.photoPath, photo);
+  const photo_path = await replacePhoto(c.boatId, c.photoPath, photo);
   check(await supabase.from("containers").update({ ...containerColumns(f), photo_path }).eq("id", c.id));
 }
 
@@ -313,12 +320,12 @@ export async function deleteContainer(c: Container, mode: "keep" | "all", siblin
 // ── Stored items ────────────────────────────────────────────────────────────
 
 interface ItemRow {
-  id: string; user_id: string; location_id: string; container_id: string | null; name: string; quantity: number;
+  id: string; user_id: string; boat_id: string; location_id: string; container_id: string | null; name: string; quantity: number;
   price: number | string | null; notes: string | null; photo_path: string | null;
   item_documents?: { id: string; name: string }[];
 }
 const toItem = (r: ItemRow): Item => ({
-  id: r.id, userId: r.user_id, locationId: r.location_id, containerId: r.container_id ?? null, name: r.name,
+  id: r.id, userId: r.user_id, boatId: r.boat_id, locationId: r.location_id, containerId: r.container_id ?? null, name: r.name,
   quantity: r.quantity, price: r.price === null ? null : Number(r.price), notes: r.notes ?? "", photoPath: r.photo_path,
   docs: r.item_documents ?? [],
 });
@@ -369,15 +376,15 @@ export async function boatContents(boatId: string): Promise<BoatContents> {
 }
 
 /** Returns the new item's id, so documents picked before saving can be attached to it. */
-export async function addItem(userId: string, locationId: string, containerId: string | null, f: ItemFields, photo: Blob | null) {
-  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+export async function addItem(boatId: string, locationId: string, containerId: string | null, f: ItemFields, photo: Blob | null) {
+  const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   const row = check(await supabase.from("items")
     .insert({ location_id: locationId, container_id: containerId, ...itemColumns(f), photo_path }).select("id").single());
   return (row as { id: string }).id;
 }
 
 export async function updateItem(item: Item, f: ItemFields, photo: Blob | null | undefined) {
-  const photo_path = await replacePhoto(item.userId, item.photoPath, photo);
+  const photo_path = await replacePhoto(item.boatId, item.photoPath, photo);
   check(await supabase.from("items").update({ ...itemColumns(f), photo_path }).eq("id", item.id));
 }
 
@@ -403,11 +410,11 @@ export async function listDocuments(itemId: string) {
   return (rows as DocumentRow[]).map(toDocument);
 }
 
-export async function attachDocument(userId: string, itemId: string, file: File) {
+export async function attachDocument(boatId: string, itemId: string, file: File) {
   if (file.size > MAX_DOCUMENT_BYTES) throw new Error(`“${file.name}” is bigger than 50 MB.`);
   const ext = /\.([a-z0-9]{1,8})$/i.exec(file.name)?.[1]?.toLowerCase();
   // Stored under a random name; the original file name is kept in the database for display.
-  const path = `${userId}/${itemId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`;
+  const path = `boats/${boatId}/docs/${itemId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`;
   check(await supabase.storage.from(DOCUMENTS).upload(path, file, { contentType: file.type || "application/octet-stream" }));
   const { error } = await supabase.from("item_documents").insert({
     item_id: itemId, name: file.name.slice(0, 255), path, size: file.size, mime_type: file.type || null,
@@ -432,4 +439,98 @@ export async function documentUrl(doc: ItemDocument) {
   const res = await supabase.storage.from(DOCUMENTS)
     .createSignedUrl(doc.path, 600, viewInBrowser ? undefined : { download: doc.name });
   return check(res)!.signedUrl;
+}
+
+// ── Sharing a boat: crew and invites ────────────────────────────────────────
+
+export type BoatRole = "owner" | "crew" | "viewer";
+
+/** Owner and crew can change things; viewers can only look. */
+export const canEdit = (role: BoatRole | null | undefined) => role === "owner" || role === "crew";
+
+export interface CrewMember { userId: string; email: string; role: BoatRole; joinedAt: string }
+
+export interface Invite { id: string; boatId: string; email: string; role: BoatRole; token: string; createdAt: string; expiresAt: string }
+
+interface InviteRow { id: string; boat_id: string; email: string; role: BoatRole; token: string; created_at: string; expires_at: string }
+const toInvite = (r: InviteRow): Invite => ({
+  id: r.id, boatId: r.boat_id, email: r.email, role: r.role, token: r.token, createdAt: r.created_at, expiresAt: r.expires_at,
+});
+
+/** The signed-in person's role on every boat they can see. */
+export async function myRoles(userId: string): Promise<Record<string, BoatRole>> {
+  const rows = check(await supabase.from("boat_members").select("boat_id, role").eq("user_id", userId)) as { boat_id: string; role: BoatRole }[];
+  return Object.fromEntries(rows.map(r => [r.boat_id, r.role]));
+}
+
+export async function myRole(userId: string, boatId: string): Promise<BoatRole | null> {
+  const row = check(await supabase.from("boat_members").select("role").eq("boat_id", boatId).eq("user_id", userId).maybeSingle());
+  return (row as { role: BoatRole } | null)?.role ?? null;
+}
+
+/** Everyone on a boat, owner first. */
+export async function boatCrew(boatId: string): Promise<CrewMember[]> {
+  const rows = check(await supabase.rpc("boat_crew", { b: boatId })) as { user_id: string; email: string; role: BoatRole; joined_at: string }[];
+  return rows.map(r => ({ userId: r.user_id, email: r.email, role: r.role, joinedAt: r.joined_at }));
+}
+
+export async function setCrewRole(boatId: string, userId: string, role: "crew" | "viewer") {
+  check(await supabase.from("boat_members").update({ role }).eq("boat_id", boatId).eq("user_id", userId));
+}
+
+/** Owner removing someone, or someone leaving (pass your own id). */
+export async function removeCrew(boatId: string, userId: string) {
+  check(await supabase.from("boat_members").delete().eq("boat_id", boatId).eq("user_id", userId));
+}
+
+/** Invites the owner has sent that haven't been accepted yet. */
+export async function pendingInvites(boatId: string) {
+  const rows = check(await supabase.from("boat_invites").select("*").eq("boat_id", boatId).is("accepted_at", null).order("created_at"));
+  return (rows as InviteRow[]).map(toInvite);
+}
+
+export async function createInvite(boatId: string, email: string, role: "crew" | "viewer") {
+  const clean = email.trim().toLowerCase();
+  const { data, error } = await supabase.from("boat_invites").insert({ boat_id: boatId, email: clean, role }).select().single();
+  if (error) {
+    if (error.code === "23505") throw new Error(`${clean} already has an invite waiting. You can share that one again below.`);
+    throw new Error("Couldn't create the invite. Check the email address and try again.");
+  }
+  return toInvite(data as InviteRow);
+}
+
+export async function cancelInvite(id: string) {
+  check(await supabase.from("boat_invites").delete().eq("id", id));
+}
+
+/** The link to send; opening it leads to sign in / sign up and then accepting. */
+export const inviteLink = (token: string) => new URL(`${import.meta.env.BASE_URL}invite/${token}`, window.location.origin).href;
+
+export interface InviteInfo { boatName: string; email: string; role: BoatRole; invitedBy: string | null; status: "pending" | "accepted" | "expired" }
+
+/** What an invite link is for (works before signing in). Undefined if the link isn't valid. */
+export async function inviteInfo(token: string): Promise<InviteInfo | undefined> {
+  if (!/^[0-9a-f-]{36}$/i.test(token)) return undefined;
+  const rows = check(await supabase.rpc("invite_info", { invite_token: token })) as
+    { boat_name: string; email: string; role: BoatRole; invited_by: string | null; status: InviteInfo["status"] }[];
+  const r = rows[0];
+  return r && { boatName: r.boat_name, email: r.email, role: r.role, invitedBy: r.invited_by, status: r.status };
+}
+
+/** Accept as the signed-in person; returns the boat id. Throws a readable message if it can't. */
+export async function acceptInvite(token: string): Promise<string> {
+  const { data, error } = await supabase.rpc("accept_invite", { invite_token: token });
+  if (error) throw new Error(error.message);
+  return data as string;
+}
+
+/** Invites waiting for the signed-in person (matched by their email), with the boat name. */
+export async function myInvites(email: string) {
+  const rows = check(await supabase.from("boat_invites").select("*").eq("email", email.toLowerCase()).is("accepted_at", null)) as InviteRow[];
+  const live = rows.map(toInvite).filter(i => new Date(i.expiresAt) > new Date());
+  return Promise.all(live.map(async i => ({ invite: i, info: await inviteInfo(i.token) })));
+}
+
+export async function declineInvite(id: string) {
+  check(await supabase.from("boat_invites").delete().eq("id", id));
 }

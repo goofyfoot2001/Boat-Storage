@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useUserId } from "../auth";
 import * as store from "../data/store";
 import type { ItemDocument } from "../data/types";
 import { fileExt, formatBytes } from "../lib/format";
@@ -11,14 +10,17 @@ const VIEWABLE = /^(application\/pdf|image\/|text\/plain)/;
  * Documents on an item. For a saved item, files upload as soon as they're picked.
  * For a new (unsaved) item they wait in `queued` and the form uploads them after saving.
  */
-export function DocumentsField({ itemId, queued, onQueue, onChanged }: {
+export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, readOnly }: {
+  /** Files are kept in the boat's folder so everyone on the boat can open them. */
+  boatId: string;
   itemId?: string;
   queued: File[];
   onQueue: (files: File[]) => void;
   /** A document was added or removed on a saved item (so the list can refresh its 📎 count). */
   onChanged?: () => void;
+  /** View-only crew can open documents but not add or remove them. */
+  readOnly?: boolean;
 }) {
-  const userId = useUserId();
   const fileRef = useRef<HTMLInputElement>(null);
   const [docs, setDocs] = useState<ItemDocument[]>([]);
   const [uploading, setUploading] = useState<string[]>([]);
@@ -41,7 +43,7 @@ export function DocumentsField({ itemId, queued, onQueue, onChanged }: {
     for (const f of ok) {
       setUploading(u => [...u, f.name]);
       try {
-        await store.attachDocument(userId, itemId, f);
+        await store.attachDocument(boatId, itemId, f);
       } catch {
         setError(`Couldn't upload “${f.name}”. Please try again.`);
       }
@@ -85,7 +87,7 @@ export function DocumentsField({ itemId, queued, onQueue, onChanged }: {
                 <span className="doc-name">{doc.name}</span>
                 <span className="muted">{formatBytes(doc.size)}</span>
               </button>
-              {confirming === doc.id ? (
+              {readOnly ? null : confirming === doc.id ? (
                 <span className="doc-confirm">
                   <button type="button" className="btn small danger" onClick={() => remove(doc)}>Remove</button>
                   <button type="button" className="btn small" onClick={() => setConfirming(null)}>Keep</button>
@@ -118,9 +120,12 @@ export function DocumentsField({ itemId, queued, onQueue, onChanged }: {
       )}
       {queued.length > 0 && <small className="field-hint">These upload when you save the item.</small>}
 
-      <button type="button" className="btn block" onClick={() => fileRef.current?.click()}>
-        <Icon name="paperclip" size={17} /> Attach document
-      </button>
+      {readOnly && docs.length === 0 && <p className="muted">No documents.</p>}
+      {!readOnly && (
+        <button type="button" className="btn block" onClick={() => fileRef.current?.click()}>
+          <Icon name="paperclip" size={17} /> Attach document
+        </button>
+      )}
       <input ref={fileRef} type="file" multiple hidden onChange={e => { pick(e.target.files); e.target.value = ""; }} />
       {error && <p className="error">{error}</p>}
     </div>

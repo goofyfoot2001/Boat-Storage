@@ -10,6 +10,7 @@ export interface Boat {
 export interface Location {
   id: string;
   userId: string;
+  boatId: string;
   deckId: string;
   name: string;
   x: number;
@@ -23,6 +24,7 @@ export interface Location {
 export interface Container {
   id: string;
   userId: string;
+  boatId: string;
   locationId: string;
   /** The container this one sits in, or null if it sits directly in the location. */
   parentId: string | null;
@@ -36,6 +38,7 @@ export interface Container {
 export interface Item {
   id: string;
   userId: string;
+  boatId: string;
   locationId: string;
   containerId: string | null;
   name: string;

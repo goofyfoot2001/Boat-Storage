@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useUserId } from "../auth";
+import { useBoatRole } from "../lib/useBoatRole";
 import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
@@ -29,11 +30,18 @@ export function BoatDecks() {
   const [editing, setEditing] = useState<Deck | null>(null);
   const [deleting, setDeleting] = useState<Deck | null>(null);
   const [reordering, setReordering] = useState(false);
+  const [crewCount, setCrewCount] = useState(0);
+  const role = useBoatRole(boatId);
+  const editable = store.canEdit(role);
+  const isOwner = role === "owner";
 
   const load = useCallback(async () => {
     const b = await store.getBoat(boatId!);
     setBoat(b ?? null);
-    if (b) setDecks(await store.listDecks(b.id));
+    if (!b) return;
+    const [list, crew] = await Promise.all([store.listDecks(b.id), store.boatCrew(b.id).catch(() => [])]);
+    setDecks(list);
+    setCrewCount(crew.length);
   }, [userId, boatId]);
 
   useEffect(() => { load(); }, [load]);
@@ -54,17 +62,17 @@ export function BoatDecks() {
           <button className="btn primary small" onClick={() => setReordering(false)}>Done</button>
         ) : (
           <>
-            {decks.length > 1 && (
+            {editable && decks.length > 1 && (
               <button className="icon-btn" onClick={() => setReordering(true)} aria-label="Reorder decks">
                 <Icon name="chevron-down" size={18} />
               </button>
             )}
-            <button className="icon-btn" onClick={() => setEditingBoat(true)} aria-label="Edit boat">
+            {isOwner && <button className="icon-btn" onClick={() => setEditingBoat(true)} aria-label="Edit boat">
               <Icon name="edit" size={17} />
-            </button>
-            <button className="icon-btn primary" onClick={() => setAdding(true)} aria-label="Add deck">
+            </button>}
+            {editable && <button className="icon-btn primary" onClick={() => setAdding(true)} aria-label="Add deck">
               <Icon name="plus" size={22} />
-            </button>
+            </button>}
           </>
         )}
       />
@@ -77,6 +85,17 @@ export function BoatDecks() {
           </Link>
         )}
 
+        {!reordering && (
+          <Link to={`/boats/${boat.id}/crew`} className="card crew-link">
+            <span className="thumb deck-thumb"><Icon name="users" size={20} /></span>
+            <span className="card-text">
+              <h3>Crew</h3>
+              <p>{crewCount > 1 ? `${crewCount} people on this boat` : isOwner ? "Invite people to help with this boat" : "Who's on this boat"}</p>
+            </span>
+            <Icon name="chevron-right" size={18} color="var(--muted)" />
+          </Link>
+        )}
+
         <h2 className="section-title">Decks</h2>
         {reordering && <p className="hint">Use the arrows to change the order, then tap Done.</p>}
 
@@ -84,21 +103,25 @@ export function BoatDecks() {
           <div className="empty">
             <Icon name="layers" size={48} />
             <h3>No decks yet</h3>
-            <p>Add a deck and upload its layout diagram. That's where you'll mark your storage spots.</p>
-            <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={18} /> Add a deck</button>
+            {editable ? (
+              <>
+                <p>Add a deck and upload its layout diagram. That's where you'll mark your storage spots.</p>
+                <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={18} /> Add a deck</button>
+              </>
+            ) : <p>The owner hasn't added any decks yet.</p>}
           </div>
         )}
 
         {decks.map((deck, i) => (
           <DeckRow key={deck.id} deck={deck} reordering={reordering}
             isFirst={i === 0} isLast={i === decks.length - 1}
-            onEdit={() => setEditing(deck)} onMove={by => reorder(i, by)} />
+            editable={editable} onEdit={() => setEditing(deck)} onMove={by => reorder(i, by)} />
         ))}
       </section>
 
       {adding && (
         <NamePhotoForm title="Add a deck" {...DECK_FORM} submitLabel="Add deck"
-          onSubmit={async (name, photo) => { await store.addDeck(userId, boat.id, name, photo ?? null, decks.length); await load(); }}
+          onSubmit={async (name, photo) => { await store.addDeck(boat.id, name, photo ?? null, decks.length); await load(); }}
           onClose={() => setAdding(false)} />
       )}
 
@@ -139,7 +162,9 @@ export function BoatDecks() {
   );
 }
 
-function DeckRow({ deck, reordering, isFirst, isLast, onEdit, onMove }: {
+function DeckRow({ deck, reordering, isFirst, isLast, editable, onEdit, onMove }: {
+  /** False for view-only crew: no edit button. */
+  editable: boolean;
   deck: Deck;
   reordering: boolean;
   isFirst: boolean;
@@ -171,7 +196,7 @@ function DeckRow({ deck, reordering, isFirst, isLast, onEdit, onMove }: {
           <button className="icon-btn" disabled={isLast} onClick={() => onMove(1)} aria-label="Move down"><Icon name="chevron-down" size={18} /></button>
         </div>
       ) : (
-        <button className="card-edit" onClick={onEdit} aria-label={`Edit ${deck.name}`}><Icon name="edit" size={17} /></button>
+        editable && <button className="card-edit" onClick={onEdit} aria-label={`Edit ${deck.name}`}><Icon name="edit" size={17} /></button>
       )}
     </div>
   );

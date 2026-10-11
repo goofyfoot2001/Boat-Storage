@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
-import { useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
 import { DeckLayout } from "../components/DeckLayout";
 import { Icon } from "../components/Icon";
@@ -10,11 +9,11 @@ import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat, Deck, Location } from "../data/types";
 import { plural } from "../lib/format";
+import { useBoatRole } from "../lib/useBoatRole";
 
 /** The deck layout with its storage-location pins. Tap + or an empty spot to add a pin there. */
 export function DeckPlan() {
   const { deckId } = useParams();
-  const userId = useUserId();
   const [params, setParams] = useSearchParams();
   const movingId = params.get("move");
 
@@ -25,6 +24,7 @@ export function DeckPlan() {
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
   const [placing, setPlacing] = useState(false);
   const photo = usePhotoUrl(deck?.photoPath);
+  const editable = store.canEdit(useBoatRole(deck?.boatId)); // viewers can look but not change pins
 
   const load = useCallback(async () => {
     const d = await store.getDeck(deckId!);
@@ -62,9 +62,9 @@ export function DeckPlan() {
             <Link className="icon-btn" to={`/boats/${deck.boatId}/search`} aria-label="Search this boat">
               <Icon name="search" size={18} />
             </Link>
-            <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
+            {editable && <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
               <Icon name="edit" size={17} />
-            </button>
+            </button>}
           </>
         }
       />
@@ -72,7 +72,7 @@ export function DeckPlan() {
       <section className="list">
         {photo ? (
           <>
-            {!moving && !placing && (
+            {editable && !moving && !placing && (
               <button className="btn primary block" onClick={() => setPlacing(true)}>
                 <Icon name="plus" size={18} /> Add location
               </button>
@@ -91,12 +91,12 @@ export function DeckPlan() {
               <p className="hint"><Icon name="map-pin" size={14} />
                 {locations.length
                   ? "Tap a pin to see what's there. Pinch or use + / − to zoom."
-                  : "Tap Add location, then tap the spot on the layout."}
+                  : editable ? "Tap Add location, then tap the spot on the layout." : "No storage locations on this deck yet."}
               </p>
             )}
 
             <DeckLayout photoUrl={photo} alt={`${deck.name} layout`} locations={locations}
-              movingId={movingId} pending={pending} onTapSpot={tapSpot} awaitingTap={!!moving || placing}
+              movingId={editable ? movingId : null} pending={pending} onTapSpot={editable ? tapSpot : undefined} awaitingTap={!!moving || placing}
               onDropPin={(x, y) => tapSpot(x, y)} />
 
             {locations.length > 0 && (
@@ -120,7 +120,7 @@ export function DeckPlan() {
             <Icon name="layers" size={48} />
             <h3>No layout picture</h3>
             <p>Add the deck diagram from your boat's manufacturer, or a photo of a hand-drawn layout. Then you can drop storage pins on it.</p>
-            <button className="btn primary" onClick={() => setEditingDeck(true)}><Icon name="camera" size={18} /> Add layout</button>
+            {editable && <button className="btn primary" onClick={() => setEditingDeck(true)}><Icon name="camera" size={18} /> Add layout</button>}
           </div>
         )}
       </section>
@@ -129,7 +129,7 @@ export function DeckPlan() {
         <LocationForm title="New storage pin" submitLabel="Add pin"
           onSubmit={async (f, p) => {
             // Stay on the deck: the new pin and list entry just appear.
-            await store.addLocation(userId, deck.id, pending.x, pending.y, f, p ?? null);
+            await store.addLocation(deck.boatId, deck.id, pending.x, pending.y, f, p ?? null);
             await load();
           }}
           onClose={() => setPending(null)} />

@@ -15,6 +15,7 @@ import * as store from "../data/store";
 import type { Container, Deck, Item, Location } from "../data/types";
 import { formatPrice, plural } from "../lib/format";
 import { buildTargets, containerPath, type Target } from "../lib/places";
+import { useBoatRole, useCrewNames } from "../lib/useBoatRole";
 
 /** Where something new is being added: the location itself (null) or a container in it. */
 type AddTarget = { containerId: string | null };
@@ -47,6 +48,11 @@ export function LocationPage() {
   const focusContainerId = params.get("container");
   const photo = usePhotoUrl(loc?.photoPath);
   const deckPhoto = usePhotoUrl(deck?.photoPath);
+  const role = useBoatRole(loc?.boatId);
+  const editable = store.canEdit(role); // viewers can look but not change anything
+  const crewNames = useCrewNames(loc?.boatId);
+  /** "Added by …" only for things someone else added, on a boat with more than one person. */
+  const addedBy = (who: string) => (who !== userId ? crewNames.get(who) : undefined);
 
   const load = useCallback(async () => {
     const l = await store.getLocation(locationId!);
@@ -109,14 +115,14 @@ export function LocationPage() {
           <ContainerCard key={c.id} container={c} itemCount={counts.get(c.id) ?? 0}
             boxCount={containers.filter(x => x.parentId === c.id).length}
             open={expanded.has(c.id)} focused={c.id === focusContainerId}
-            onToggle={() => toggle(c.id)} onEdit={() => setEditingContainer(c)}
+            editable={editable} onToggle={() => toggle(c.id)} onEdit={() => setEditingContainer(c)}
             onAddItem={() => setAddingItem({ containerId: c.id })}
             onAddContainer={() => setAddingContainer({ containerId: c.id })}>
             {contents(c.id)}
           </ContainerCard>
         ))}
         {items.filter(i => i.containerId === parentId).map(item => (
-          <ItemCard key={item.id} item={item} focused={item.id === focusItemId} onEdit={() => setEditingItem(item)} />
+          <ItemCard key={item.id} item={item} addedBy={addedBy(item.userId)} focused={item.id === focusItemId} onEdit={() => setEditingItem(item)} />
         ))}
       </>
     );
@@ -134,12 +140,14 @@ export function LocationPage() {
                 <Icon name="search" size={18} />
               </Link>
             )}
+            {editable && <>
             <button className="icon-btn" onClick={() => setEditingLoc(true)} aria-label="Edit location">
               <Icon name="edit" size={17} />
             </button>
             <button className="icon-btn primary" onClick={() => setChoosing({ containerId: null })} aria-label="Add item or container">
               <Icon name="plus" size={22} />
             </button>
+            </>}
           </>
         }
       />
@@ -163,11 +171,15 @@ export function LocationPage() {
           <div className="empty">
             <Icon name="map-pin" size={48} />
             <h3>Nothing here yet</h3>
-            <p>Add the things you keep in this spot, or a bin or box to sort them into.</p>
-            <div className="row">
-              <button className="btn primary" onClick={() => setAddingItem({ containerId: null })}><Icon name="plus" size={18} /> Item</button>
-              <button className="btn" onClick={() => setAddingContainer({ containerId: null })}><Icon name="box" size={18} /> Container</button>
-            </div>
+            {editable ? (
+              <>
+                <p>Add the things you keep in this spot, or a bin or box to sort them into.</p>
+                <div className="row">
+                  <button className="btn primary" onClick={() => setAddingItem({ containerId: null })}><Icon name="plus" size={18} /> Item</button>
+                  <button className="btn" onClick={() => setAddingContainer({ containerId: null })}><Icon name="box" size={18} /> Container</button>
+                </div>
+              </>
+            ) : <p>Nothing has been stored here yet.</p>}
           </div>
         ) : (
           contents(null)
@@ -188,10 +200,10 @@ export function LocationPage() {
       )}
 
       {addingItem && (
-        <StoredItemForm insideName={addingItem.containerId ? nameOf(addingItem) : undefined}
+        <StoredItemForm boatId={loc.boatId} insideName={addingItem.containerId ? nameOf(addingItem) : undefined}
           onSubmit={async (f, p, docs) => {
-            const itemId = await store.addItem(userId, loc.id, addingItem.containerId, f, p ?? null);
-            for (const d of docs) await store.attachDocument(userId, itemId, d);
+            const itemId = await store.addItem(loc.boatId, loc.id, addingItem.containerId, f, p ?? null);
+            for (const d of docs) await store.attachDocument(loc.boatId, itemId, d);
             if (addingItem.containerId) setExpanded(prev => new Set([...prev, addingItem.containerId!]));
             await load();
           }}
@@ -201,7 +213,7 @@ export function LocationPage() {
       {addingContainer && (
         <ContainerForm insideName={nameOf(addingContainer)}
           onSubmit={async (f, p) => {
-            await store.addContainer(userId, loc.id, addingContainer.containerId, f, p ?? null);
+            await store.addContainer(loc.boatId, loc.id, addingContainer.containerId, f, p ?? null);
             if (addingContainer.containerId) setExpanded(prev => new Set([...prev, addingContainer.containerId!]));
             await load();
           }}
@@ -209,7 +221,8 @@ export function LocationPage() {
       )}
 
       {editingItem && (
-        <StoredItemForm item={editingItem} targets={targetsFor()}
+        <StoredItemForm boatId={loc.boatId} item={editingItem} targets={targetsFor()} readOnly={!editable}
+          addedBy={addedBy(editingItem.userId)}
           onSubmit={async (f, p) => { await store.updateItem(editingItem, f, p); await load(); }}
           onDocsChanged={load}
           onDelete={() => { setDeletingItem(editingItem); setEditingItem(null); }}
@@ -264,12 +277,14 @@ export function LocationPage() {
   );
 }
 
-function ContainerCard({ container, itemCount, boxCount, open, focused, onToggle, onEdit, onAddItem, onAddContainer, children }: {
+function ContainerCard({ container, itemCount, boxCount, open, focused, editable, onToggle, onEdit, onAddItem, onAddContainer, children }: {
   container: Container;
   itemCount: number;
   boxCount: number;
   open: boolean;
   focused: boolean;
+  /** False for view-only crew: no edit or add buttons. */
+  editable: boolean;
   onToggle: () => void;
   onEdit: () => void;
   onAddItem: () => void;
@@ -292,17 +307,19 @@ function ContainerCard({ container, itemCount, boxCount, open, focused, onToggle
             <p>{summary}</p>
           </span>
         </button>
-        <button className="card-edit" onClick={onEdit} aria-label={`Edit ${container.name}`}><Icon name="edit" size={17} /></button>
+        {editable && <button className="card-edit" onClick={onEdit} aria-label={`Edit ${container.name}`}><Icon name="edit" size={17} /></button>}
       </div>
       {open && (
         <div className="box-contents">
           {container.notes && <p className="box-notes"><Linkify text={container.notes} /></p>}
           {children}
           {itemCount === 0 && boxCount === 0 && <p className="muted box-empty">Empty</p>}
-          <div className="row box-add">
-            <button className="btn small" onClick={onAddItem}><Icon name="plus" size={15} /> Item</button>
-            <button className="btn small" onClick={onAddContainer}><Icon name="box" size={15} /> Container</button>
-          </div>
+          {editable && (
+            <div className="row box-add">
+              <button className="btn small" onClick={onAddItem}><Icon name="plus" size={15} /> Item</button>
+              <button className="btn small" onClick={onAddContainer}><Icon name="box" size={15} /> Container</button>
+            </div>
+          )}
         </div>
       )}
     </div>
@@ -344,7 +361,7 @@ function DeleteContainer({ container, itemCount, boxCount, outInto, onDelete, on
   );
 }
 
-function ItemCard({ item, focused, onEdit }: { item: Item; focused: boolean; onEdit: () => void }) {
+function ItemCard({ item, addedBy, focused, onEdit }: { item: Item; addedBy?: string; focused: boolean; onEdit: () => void }) {
   const photo = usePhotoUrl(item.photoPath);
   return (
     // The whole card opens the item; links in the description open the link instead (Linkify stops the tap).
@@ -364,6 +381,7 @@ function ItemCard({ item, focused, onEdit }: { item: Item; focused: boolean; onE
               <Icon name="paperclip" size={13} /> {item.docs.length}
             </span>
           )}
+          {addedBy && <span className="added-by">by {addedBy}</span>}
           {item.price != null && (
             <span>
               {formatPrice(item.price)} each
