@@ -6,6 +6,7 @@ import { BoatDecks } from "./pages/BoatDecks";
 import { Boats } from "./pages/Boats";
 import { DeckPlan } from "./pages/DeckPlan";
 import { LocationPage } from "./pages/LocationPage";
+import { SearchPage } from "./pages/SearchPage";
 import { Login } from "./pages/Login";
 import "./styles.css";
 
@@ -16,6 +17,7 @@ function App() {
     <Routes>
       <Route path="/" element={<Boats />} />
       <Route path="/boats/:boatId" element={<BoatDecks />} />
+      <Route path="/boats/:boatId/search" element={<SearchPage />} />
       <Route path="/decks/:deckId" element={<DeckPlan />} />
       <Route path="/locations/:locationId" element={<LocationPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />

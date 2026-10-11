@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
-import { Navigate, useNavigate, useParams } from "react-router-dom";
+import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
+import { DeckLayout } from "../components/DeckLayout";
 import { Icon } from "../components/Icon";
 import { Linkify } from "../components/Linkify";
 import { LocationForm } from "../components/LocationForm";
@@ -11,6 +12,7 @@ import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Deck, Item, Location } from "../data/types";
 import { formatPrice, plural } from "../lib/format";
+import type { Place } from "../lib/search";
 
 /** One storage location and everything stored there. */
 export function LocationPage() {
@@ -25,18 +27,35 @@ export function LocationPage() {
   const [adding, setAdding] = useState(false);
   const [editing, setEditing] = useState<Item | null>(null);
   const [deleting, setDeleting] = useState<Item | null>(null);
+  const [deckPins, setDeckPins] = useState<Location[]>([]);
+  const [places, setPlaces] = useState<Place[]>([]);
+  const [params] = useSearchParams();
+  const focusItemId = params.get("item"); // arriving from a search result
   const photo = usePhotoUrl(loc?.photoPath);
+  const deckPhoto = usePhotoUrl(deck?.photoPath);
 
   const load = useCallback(async () => {
     const l = await store.getLocation(locationId!);
     setLoc(l ?? null);
     if (!l) return;
-    const [d, list] = await Promise.all([store.getDeck(l.deckId), store.listItems(l.id)]);
+    const [d, list, pins] = await Promise.all([store.getDeck(l.deckId), store.listItems(l.id), store.listLocations(l.deckId)]);
     setDeck(d);
     setItems(list);
+    setDeckPins(pins);
   }, [locationId]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Every location on this boat, for the "Stored at" choice when editing an item.
+  useEffect(() => {
+    if (editing && deck && !places.length) store.boatContents(deck.boatId).then(c => setPlaces(c.locations));
+  }, [editing, deck, places.length]);
+
+  // Scroll to the item picked in search and flash it.
+  useEffect(() => {
+    if (!focusItemId || !items.length) return;
+    document.getElementById(`item-${focusItemId}`)?.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, [focusItemId, items]);
 
   if (loc === null) return <Navigate to="/" replace />;
   if (!loc) return null;
@@ -49,6 +68,11 @@ export function LocationPage() {
       <AppHeader backTo={`/decks/${loc.deckId}`} title={loc.name} subtitle={subtitle}
         right={
           <>
+            {deck && (
+              <Link className="icon-btn" to={`/boats/${deck.boatId}/search`} aria-label="Search this boat">
+                <Icon name="search" size={18} />
+              </Link>
+            )}
             <button className="icon-btn" onClick={() => setEditingLoc(true)} aria-label="Edit location">
               <Icon name="edit" size={17} />
             </button>
@@ -60,6 +84,13 @@ export function LocationPage() {
       />
 
       <section className="list">
+        {deckPhoto && (
+          <>
+            <DeckLayout photoUrl={deckPhoto} alt={`${deck?.name} layout`} locations={deckPins} currentId={loc.id} />
+            {deckPins.length > 1 && <p className="hint"><Icon name="map-pin" size={14} /> Tap another pin to jump to that location.</p>}
+          </>
+        )}
+
         {photo && <img className="loc-photo" src={photo} alt={loc.name} style={{ borderColor: loc.color }} />}
 
         <h2 className="section-title">Stored here</h2>
@@ -73,7 +104,9 @@ export function LocationPage() {
           </div>
         )}
 
-        {items.map(item => <ItemCard key={item.id} item={item} onEdit={() => setEditing(item)} />)}
+        {items.map(item => (
+          <ItemCard key={item.id} item={item} focused={item.id === focusItemId} onEdit={() => setEditing(item)} />
+        ))}
       </section>
 
       {adding && (
@@ -83,7 +116,7 @@ export function LocationPage() {
       )}
 
       {editing && (
-        <StoredItemForm item={editing}
+        <StoredItemForm item={editing} places={places}
           onSubmit={async (f, p) => { await store.updateItem(editing, f, p); await load(); }}
           onDelete={() => { setDeleting(editing); setEditing(null); }}
           onClose={() => setEditing(null)} />
@@ -117,10 +150,10 @@ export function LocationPage() {
   );
 }
 
-function ItemCard({ item, onEdit }: { item: Item; onEdit: () => void }) {
+function ItemCard({ item, focused, onEdit }: { item: Item; focused: boolean; onEdit: () => void }) {
   const photo = usePhotoUrl(item.photoPath);
   return (
-    <div className="card item-card">
+    <div className={`card item-card${focused ? " flash" : ""}`} id={`item-${item.id}`}>
       {photo && <img className="item-photo" src={photo} alt="" />}
       <div className="item-body">
         <div className="item-head">

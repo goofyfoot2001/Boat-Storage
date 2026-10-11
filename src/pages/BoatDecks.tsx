@@ -70,6 +70,13 @@ export function BoatDecks() {
       />
 
       <section className="list">
+        {decks.length > 0 && !reordering && (
+          <Link to={`/boats/${boat.id}/search`} className="search-box as-link">
+            <Icon name="search" size={18} />
+            <span>Search {boat.name}…</span>
+          </Link>
+        )}
+
         <h2 className="section-title">Decks</h2>
         {reordering && <p className="hint">Use the arrows to change the order, then tap Done.</p>}
 

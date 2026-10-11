@@ -1,7 +1,8 @@
-import { useCallback, useEffect, useRef, useState, type MouseEvent, type PointerEvent } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import { useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
+import { DeckLayout } from "../components/DeckLayout";
 import { Icon } from "../components/Icon";
 import { LocationForm } from "../components/LocationForm";
 import { NamePhotoForm } from "../components/NamePhotoForm";
@@ -9,7 +10,6 @@ import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat, Deck, Location } from "../data/types";
 import { plural } from "../lib/format";
-import { usePanZoom } from "../lib/usePanZoom";
 
 /** The deck layout with its storage-location pins. Tap + or an empty spot to add a pin there. */
 export function DeckPlan() {
@@ -25,11 +25,7 @@ export function DeckPlan() {
   const [editingDeck, setEditingDeck] = useState(false);
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
   const [placing, setPlacing] = useState(false);
-  const [hovered, setHovered] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const pointerType = useRef("mouse");
   const photo = usePhotoUrl(deck?.photoPath);
-  const zoom = usePanZoom();
 
   const load = useCallback(async () => {
     const d = await store.getDeck(deckId!);
@@ -47,12 +43,7 @@ export function DeckPlan() {
 
   const moving = locations.find(l => l.id === movingId);
 
-  async function tapPlan(e: MouseEvent<HTMLDivElement>) {
-    if (zoom.wasGesture()) return; // that was a pinch or drag, not a tap
-    if (selected) return setSelected(null); // first tap away just closes the name bubble
-    const box = e.currentTarget.getBoundingClientRect();
-    const x = clamp((e.clientX - box.left) / box.width);
-    const y = clamp((e.clientY - box.top) / box.height);
+  async function tapSpot(x: number, y: number) {
     if (moving) {
       setLocations(ls => ls.map(l => (l.id === moving.id ? { ...l, x, y } : l)));
       setParams({}, { replace: true });
@@ -63,25 +54,19 @@ export function DeckPlan() {
     }
   }
 
-  function tapDot(e: MouseEvent, loc: Location) {
-    e.stopPropagation();
-    if (moving || zoom.wasGesture()) return;
-    // Mouse: hovering already shows the name, so a click opens it.
-    // Finger: the first tap shows the name, a second tap opens it.
-    if (pointerType.current === "mouse" || selected === loc.id) navigate(`/locations/${loc.id}`);
-    else setSelected(loc.id);
-  }
-
-  const showLabel = (id: string) => !moving && (hovered === id || selected === id);
-
   return (
     <div className="page">
       <AppHeader backTo={`/boats/${deck.boatId}`} title={deck.name}
         subtitle={[boat?.name, plural(locations.length, "location")].filter(Boolean).join(" · ")}
         right={
-          <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
-            <Icon name="edit" size={17} />
-          </button>
+          <>
+            <Link className="icon-btn" to={`/boats/${deck.boatId}/search`} aria-label="Search this boat">
+              <Icon name="search" size={18} />
+            </Link>
+            <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
+              <Icon name="edit" size={17} />
+            </button>
+          </>
         }
       />
 
@@ -89,7 +74,7 @@ export function DeckPlan() {
         {photo ? (
           <>
             {!moving && !placing && (
-              <button className="btn primary block" onClick={() => { setSelected(null); setPlacing(true); }}>
+              <button className="btn primary block" onClick={() => setPlacing(true)}>
                 <Icon name="plus" size={18} /> Add location
               </button>
             )}
@@ -109,50 +94,8 @@ export function DeckPlan() {
               </p>
             )}
 
-            <div className={`card plan${moving || placing ? " moving" : ""}`}>
-              <div className={`plan-frame${zoom.view.scale > 1 ? " zoomed" : ""}`} ref={zoom.frameRef}
-                {...zoom.handlers}
-                onPointerDown={e => { pointerType.current = e.pointerType; zoom.handlers.onPointerDown(e); }}>
-              <div className="plan-canvas" onClick={tapPlan}
-                style={{ transform: `translate(${zoom.view.x}px, ${zoom.view.y}px) scale(${zoom.view.scale})` }}>
-                <img src={photo} alt={`${deck.name} layout`} draggable={false} />
-                {locations.map(loc => (
-                  <div key={loc.id} className={[
-                    "dot-wrap",
-                    loc.y < 0.18 && "label-below",
-                    loc.x < 0.25 && "label-start",
-                    loc.x > 0.75 && "label-end",
-                    loc.id === movingId && "is-moving",
-                  ].filter(Boolean).join(" ")}
-                    style={{ left: `${loc.x * 100}%`, top: `${loc.y * 100}%`, transform: `scale(${1 / zoom.view.scale})` }}>
-                    <button className="dot" style={{ background: loc.color }} aria-label={`${loc.name}, ${plural(loc.itemCount, "item")}`}
-                      onPointerDown={(e: PointerEvent) => (pointerType.current = e.pointerType)}
-                      onPointerEnter={(e: PointerEvent) => e.pointerType === "mouse" && setHovered(loc.id)}
-                      onPointerLeave={() => setHovered(h => (h === loc.id ? null : h))}
-                      onFocus={() => setHovered(loc.id)} onBlur={() => setHovered(null)}
-                      onClick={e => tapDot(e, loc)} />
-                    {showLabel(loc.id) && (
-                      <Link to={`/locations/${loc.id}`} className="dot-label" onClick={e => e.stopPropagation()}>
-                        <span className="dot-label-name">{loc.name}</span>
-                        <span className="dot-label-count">{plural(loc.itemCount, "item")}</span>
-                        <Icon name="chevron-right" size={14} />
-                      </Link>
-                    )}
-                  </div>
-                ))}
-                {pending && (
-                  <div className="dot-wrap" style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%`, transform: `scale(${1 / zoom.view.scale})` }}>
-                    <span className="dot pending" />
-                  </div>
-                )}
-              </div>
-              </div>
-              <div className="zoom-controls">
-                <button onClick={() => zoom.zoomBy(1.6)} aria-label="Zoom in">+</button>
-                <button onClick={() => zoom.zoomBy(1 / 1.6)} disabled={zoom.view.scale <= 1} aria-label="Zoom out">−</button>
-                {zoom.view.scale > 1 && <button onClick={zoom.reset} aria-label="Reset zoom" className="zoom-reset">1×</button>}
-              </div>
-            </div>
+            <DeckLayout photoUrl={photo} alt={`${deck.name} layout`} locations={locations}
+              movingId={movingId} pending={pending} onTapSpot={tapSpot} awaitingTap={!!moving || placing} />
 
             {locations.length > 0 && (
               <>
@@ -199,5 +142,3 @@ export function DeckPlan() {
     </div>
   );
 }
-
-const clamp = (n: number) => Math.min(0.99, Math.max(0.01, n));

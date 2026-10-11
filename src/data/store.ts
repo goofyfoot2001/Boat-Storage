@@ -227,11 +227,39 @@ export async function listItems(locationId: string) {
   return (rows as ItemRow[]).map(toItem);
 }
 
-export interface ItemFields { name: string; quantity: number; price: number | null; notes: string }
+export interface ItemFields {
+  name: string; quantity: number; price: number | null; notes: string;
+  /** Set to move the item to another location. */
+  locationId?: string;
+}
 
 const itemColumns = (f: ItemFields) => ({
   name: f.name.trim(), quantity: f.quantity, price: f.price, notes: f.notes.trim() || null,
+  ...(f.locationId ? { location_id: f.locationId } : {}),
 });
+
+// ── Everything on one boat (search, moving items) ───────────────────────────
+
+export interface BoatContents {
+  decks: { id: string; name: string }[];
+  locations: { id: string; name: string; color: string; deckId: string; deckName: string }[];
+  items: Item[];
+}
+
+export async function boatContents(boatId: string): Promise<BoatContents> {
+  const rows = check(await supabase.from("decks")
+    .select("id, name, sort_order, locations(id, name, color, items(*))")
+    .eq("boat_id", boatId).order("sort_order")) as {
+      id: string; name: string;
+      locations: { id: string; name: string; color: string; items: ItemRow[] }[];
+    }[];
+  return {
+    decks: rows.map(d => ({ id: d.id, name: d.name })),
+    locations: rows.flatMap(d => d.locations.map(l => ({ id: l.id, name: l.name, color: l.color, deckId: d.id, deckName: d.name })))
+      .sort((a, b) => a.deckName.localeCompare(b.deckName) || a.name.localeCompare(b.name)),
+    items: rows.flatMap(d => d.locations.flatMap(l => l.items.map(toItem))),
+  };
+}
 
 export async function addItem(userId: string, locationId: string, f: ItemFields, photo: Blob | null) {
   const photo_path = photo ? await uploadPhoto(userId, photo) : null;

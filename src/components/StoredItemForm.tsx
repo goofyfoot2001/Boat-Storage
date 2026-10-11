@@ -1,13 +1,16 @@
 import { useState, type FormEvent } from "react";
 import type { ItemFields } from "../data/store";
 import type { Item } from "../data/types";
+import type { Place } from "../lib/search";
 import { Icon } from "./Icon";
 import { PhotoField } from "./PhotoField";
 import { Sheet } from "./Sheet";
 
 /** Add/edit something stored at a location. */
-export function StoredItemForm({ item, onSubmit, onClose, onDelete }: {
+export function StoredItemForm({ item, places = [], onSubmit, onClose, onDelete }: {
   item?: Item;
+  /** Locations on this boat the item can be moved to (editing only). */
+  places?: Place[];
   onSubmit: (f: ItemFields, photo: Blob | null | undefined) => Promise<void>;
   onClose: () => void;
   onDelete?: () => void;
@@ -16,6 +19,7 @@ export function StoredItemForm({ item, onSubmit, onClose, onDelete }: {
   const [quantity, setQuantity] = useState(String(item?.quantity ?? 1));
   const [price, setPrice] = useState(item?.price != null ? item.price.toFixed(2) : "");
   const [notes, setNotes] = useState(item?.notes ?? "");
+  const [locationId, setLocationId] = useState(item?.locationId ?? "");
   const [photo, setPhoto] = useState<Blob | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -29,7 +33,10 @@ export function StoredItemForm({ item, onSubmit, onClose, onDelete }: {
     if (cleanPrice && !/^\d+(\.\d{1,2})?$/.test(cleanPrice)) return setError("Price should look like 24.99");
     setBusy(true);
     try {
-      await onSubmit({ name, quantity: qty, price: cleanPrice ? Number(cleanPrice) : null, notes }, photo);
+      await onSubmit({
+        name, quantity: qty, price: cleanPrice ? Number(cleanPrice) : null, notes,
+        locationId: item && locationId !== item.locationId ? locationId : undefined,
+      }, photo);
       onClose();
     } catch {
       setError("Something went wrong saving. Please try again.");
@@ -71,6 +78,20 @@ export function StoredItemForm({ item, onSubmit, onClose, onDelete }: {
             placeholder="Part numbers, where you bought it, a link to reorder…" />
           <small className="field-hint">Web links you paste here become tappable.</small>
         </label>
+
+        {item && places.length > 1 && (
+          <label className="field">
+            <span>Stored at</span>
+            <select value={locationId} onChange={e => setLocationId(e.target.value)}>
+              {[...new Set(places.map(p => p.deckName))].map(deckName => (
+                <optgroup key={deckName} label={deckName}>
+                  {places.filter(p => p.deckName === deckName).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
+                </optgroup>
+              ))}
+            </select>
+            {locationId !== item.locationId && <small className="field-hint">Saving will move this item there.</small>}
+          </label>
+        )}
 
         <PhotoField label="Picture" hint="Take a photo or choose one" savedPath={item?.photoPath}
           value={photo} onChange={v => { setPhoto(v); setError(""); }} onError={setError} />

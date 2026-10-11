@@ -169,6 +169,41 @@ a.row-card-main:active { background: #EEF3F8; }
 .loc-swatch { width: 14px; height: 14px; border-radius: 50%; flex: none; box-shadow: 0 0 0 2px #fff, 0 0 0 3px var(--border); }
 .muted { color: var(--muted); font-size: 13px; font-weight: 400; }
 
+/* The pin for the location you're looking at */
+.is-current .dot { transform: scale(1.35); box-shadow: 0 0 0 3px #fff, 0 0 0 5px currentColor, 0 1px 6px rgb(0 0 0 / 0.4); }
+.is-current { z-index: 2; }
+.plan-canvas:not(.can-add) { cursor: default; }
+
+/* ── Search ─────────────────────────────────────────────────────────── */
+.search-box {
+  display: flex; align-items: center; gap: 10px; min-height: 50px; padding: 0 8px 0 14px;
+  background: #fff; border: 1.5px solid var(--border); border-radius: 14px; color: var(--muted);
+}
+.search-box:focus-within { border-color: var(--tint); box-shadow: 0 0 0 3px var(--tint-soft); color: var(--tint); }
+.search-box input { flex: 1; min-width: 0; border: 0; outline: none; font: inherit; font-size: 16px; color: var(--text); background: none; }
+.search-box input::-webkit-search-cancel-button { display: none; }
+.search-box button { border: 0; background: var(--tint-soft); color: var(--tint); width: 32px; height: 32px; border-radius: 50%; display: grid; place-items: center; }
+.search-box.as-link { font-size: 16px; }
+.search-box.as-link:active { background: #EEF3F8; }
+
+.result { display: flex; align-items: center; gap: 12px; padding: 12px; }
+.result:active { background: #EEF3F8; }
+.result-thumb { width: 56px; height: 56px; border-radius: 12px; align-self: flex-start; }
+.result .card-text h3 { white-space: normal; }
+.result .card-text p { margin-top: 2px; }
+.result-place { display: flex; align-items: center; gap: 6px; font-weight: 600; color: var(--text-2); }
+.result-place .loc-swatch { width: 10px; height: 10px; }
+.result-notes { overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+mark { background: #FFE58A; color: inherit; border-radius: 3px; padding: 0 1px; }
+
+.flash { animation: flash 2.4s ease-out; }
+@keyframes flash { 0%, 30% { box-shadow: 0 0 0 3px var(--tint), var(--shadow); } }
+
+.field select {
+  font: inherit; font-size: 16px; min-height: 50px; padding: 0 12px; border-radius: 12px;
+  border: 1.5px solid var(--border); background: #fff; color: var(--text);
+}
+
 /* ── Location page ──────────────────────────────────────────────────── */
 .loc-photo { width: 100%; max-height: 260px; object-fit: cover; border-radius: var(--radius); border-bottom: 5px solid; }
 
