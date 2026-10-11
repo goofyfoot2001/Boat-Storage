@@ -38,4 +38,5 @@ export interface Deck {
   name: string;
   photoPath: string | null;
   sortOrder: number;
+  locationCount: number;
 }

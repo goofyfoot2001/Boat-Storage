@@ -5,9 +5,9 @@ import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
 import { NamePhotoForm } from "../components/NamePhotoForm";
-import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat, Deck } from "../data/types";
+import { plural } from "../lib/format";
 import { move } from "../lib/move";
 
 const DECK_FORM = {
@@ -82,13 +82,11 @@ export function BoatDecks() {
           </div>
         )}
 
-        <div className="deck-grid">
-          {decks.map((deck, i) => (
-            <DeckCard key={deck.id} deck={deck} reordering={reordering}
-              isFirst={i === 0} isLast={i === decks.length - 1}
-              onEdit={() => setEditing(deck)} onMove={by => reorder(i, by)} />
-          ))}
-        </div>
+        {decks.map((deck, i) => (
+          <DeckRow key={deck.id} deck={deck} reordering={reordering}
+            isFirst={i === 0} isLast={i === decks.length - 1}
+            onEdit={() => setEditing(deck)} onMove={by => reorder(i, by)} />
+        ))}
       </section>
 
       {adding && (
@@ -134,7 +132,7 @@ export function BoatDecks() {
   );
 }
 
-function DeckCard({ deck, reordering, isFirst, isLast, onEdit, onMove }: {
+function DeckRow({ deck, reordering, isFirst, isLast, onEdit, onMove }: {
   deck: Deck;
   reordering: boolean;
   isFirst: boolean;
@@ -142,29 +140,32 @@ function DeckCard({ deck, reordering, isFirst, isLast, onEdit, onMove }: {
   onEdit: () => void;
   onMove: (by: -1 | 1) => void;
 }) {
-  const photo = usePhotoUrl(deck.photoPath);
-  const picture = (
-    <div className="deck-picture">
-      {photo ? <img src={photo} alt="" /> : (
-        <div className="deck-picture-empty"><Icon name="layers" size={32} /><span>No layout yet</span></div>
-      )}
-    </div>
+  const body = (
+    <>
+      <div className="thumb deck-thumb"><Icon name="layers" size={20} /></div>
+      <div className="card-text">
+        <h3>{deck.name}</h3>
+        <p>{deck.photoPath ? plural(deck.locationCount, "location") : "No layout picture yet"}</p>
+      </div>
+    </>
   );
 
   return (
-    <div className="card deck-card">
-      {reordering ? picture : <Link to={`/decks/${deck.id}`}>{picture}</Link>}
-      <div className="deck-card-foot">
-        <h3>{deck.name}</h3>
-        {reordering ? (
-          <div className="reorder">
-            <button className="icon-btn" disabled={isFirst} onClick={() => onMove(-1)} aria-label="Move up"><Icon name="chevron-up" size={18} /></button>
-            <button className="icon-btn" disabled={isLast} onClick={() => onMove(1)} aria-label="Move down"><Icon name="chevron-down" size={18} /></button>
-          </div>
-        ) : (
-          <button className="card-edit" onClick={onEdit} aria-label={`Edit ${deck.name}`}><Icon name="edit" size={17} /></button>
-        )}
-      </div>
+    <div className="card row-card">
+      {reordering ? <div className="row-card-main">{body}</div> : (
+        <Link to={`/decks/${deck.id}`} className="row-card-main">
+          {body}
+          <Icon name="chevron-right" size={18} color="var(--muted)" />
+        </Link>
+      )}
+      {reordering ? (
+        <div className="reorder">
+          <button className="icon-btn" disabled={isFirst} onClick={() => onMove(-1)} aria-label="Move up"><Icon name="chevron-up" size={18} /></button>
+          <button className="icon-btn" disabled={isLast} onClick={() => onMove(1)} aria-label="Move down"><Icon name="chevron-down" size={18} /></button>
+        </div>
+      ) : (
+        <button className="card-edit" onClick={onEdit} aria-label={`Edit ${deck.name}`}><Icon name="edit" size={17} /></button>
+      )}
     </div>
   );
 }

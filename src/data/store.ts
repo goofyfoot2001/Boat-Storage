@@ -122,13 +122,14 @@ export async function reorderBoats(boats: Boat[]) {
 
 // ── Decks ───────────────────────────────────────────────────────────────────
 
-interface DeckRow { id: string; user_id: string; boat_id: string; name: string; photo_path: string | null; sort_order: number }
+interface DeckRow { id: string; user_id: string; boat_id: string; name: string; photo_path: string | null; sort_order: number; locations?: { count: number }[] }
 const toDeck = (r: DeckRow): Deck => ({
   id: r.id, userId: r.user_id, boatId: r.boat_id, name: r.name, photoPath: r.photo_path, sortOrder: r.sort_order,
+  locationCount: r.locations?.[0]?.count ?? 0,
 });
 
 export async function listDecks(boatId: string) {
-  const rows = check(await supabase.from("decks").select("*").eq("boat_id", boatId).order("sort_order").order("created_at"));
+  const rows = check(await supabase.from("decks").select("*, locations(count)").eq("boat_id", boatId).order("sort_order").order("created_at"));
   return (rows as DeckRow[]).map(toDeck);
 }
 
