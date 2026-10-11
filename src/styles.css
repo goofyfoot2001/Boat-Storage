@@ -170,8 +170,19 @@ a.row-card-main:active { background: #EEF3F8; }
 .muted { color: var(--muted); font-size: 13px; font-weight: 400; }
 
 /* The pin for the location you're looking at */
-.is-current .dot { transform: scale(1.35); box-shadow: 0 0 0 3px #fff, 0 0 0 5px currentColor, 0 1px 6px rgb(0 0 0 / 0.4); }
+/* The pin for the location you're on gently "breathes": a slow swell plus a soft glow in its own color. */
 .is-current { z-index: 2; }
+.is-current .dot { animation: breathe 2.4s ease-in-out infinite; }
+.is-current .dot::after {
+  content: ""; position: absolute; inset: -1px; border-radius: 50%;
+  background: currentColor; z-index: -1; pointer-events: none;
+  animation: glow 2.4s ease-in-out infinite;
+}
+@keyframes breathe { 50% { transform: scale(1.22); } }
+@keyframes glow { 0%, 100% { transform: scale(1); opacity: 0; } 50% { transform: scale(2.1); opacity: 0.35; } }
+@media (prefers-reduced-motion: reduce) {
+  .is-current .dot, .is-current .dot::after { animation: none; }
+}
 .plan-canvas:not(.can-add) { cursor: default; }
 
 /* ── Search ─────────────────────────────────────────────────────────── */
