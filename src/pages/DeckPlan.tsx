@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { Link, Navigate, useParams, useSearchParams } from "react-router-dom";
 import { useUserId } from "../auth";
 import { AppHeader } from "../components/AppHeader";
 import { DeckLayout } from "../components/DeckLayout";
@@ -15,7 +15,6 @@ import { plural } from "../lib/format";
 export function DeckPlan() {
   const { deckId } = useParams();
   const userId = useUserId();
-  const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const movingId = params.get("move");
 
@@ -129,8 +128,9 @@ export function DeckPlan() {
       {pending && (
         <LocationForm title="New storage pin" submitLabel="Add pin"
           onSubmit={async (f, p) => {
-            const loc = await store.addLocation(userId, deck.id, pending.x, pending.y, f, p ?? null);
-            navigate(`/locations/${loc.id}`);
+            // Stay on the deck: the new pin and list entry just appear.
+            await store.addLocation(userId, deck.id, pending.x, pending.y, f, p ?? null);
+            await load();
           }}
           onClose={() => setPending(null)} />
       )}
