@@ -162,7 +162,7 @@ function ItemCard({ item, focused, onEdit }: { item: Item; focused: boolean; onE
     <div className={`card item-card tappable${focused ? " flash" : ""}`} id={`item-${item.id}`}
       role="button" tabIndex={0} aria-label={`Open ${item.name}`} onClick={onEdit}
       onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}>
-      {photo && <img className="item-photo" src={photo} alt="" />}
+      <div className="thumb item-thumb">{photo ? <img src={photo} alt="" /> : <Icon name="map-pin" size={18} />}</div>
       <div className="item-body">
         <div className="item-head">
           <h3>{item.name}</h3>
