@@ -67,7 +67,8 @@ export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pend
               loc.id === currentId && "is-current",
             ].filter(Boolean).join(" ")}
               style={{ left: `${loc.x * 100}%`, top: `${loc.y * 100}%`, transform: inverse }}>
-              <button className="dot" style={{ background: loc.color, color: loc.color }}
+              {loc.id === currentId && <span className="pin-glow" style={{ background: loc.color }} aria-hidden="true" />}
+              <button className="dot" style={{ background: loc.color }}
                 aria-label={`${loc.name}, ${plural(loc.itemCount, "item")}${loc.id === currentId ? " (you are here)" : ""}`}
                 onPointerDown={e => (pointerType.current = e.pointerType)}
                 onPointerEnter={e => e.pointerType === "mouse" && setHovered(loc.id)}

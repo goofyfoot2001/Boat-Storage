@@ -8,7 +8,10 @@ import { DeckPlan } from "./pages/DeckPlan";
 import { LocationPage } from "./pages/LocationPage";
 import { SearchPage } from "./pages/SearchPage";
 import { Login } from "./pages/Login";
+import { startAutoUpdate } from "./lib/autoUpdate";
 import "./styles.css";
+
+startAutoUpdate();
 
 function App() {
   const { session } = useAuth();

@@ -143,7 +143,10 @@ a.row-card-main:active { background: #EEF3F8; }
 }
 /* Bigger invisible target so dots are easy to hit with a finger */
 .dot::before { content: ""; position: absolute; inset: -14px; border-radius: 50%; }
-.dot:hover, .dot:focus-visible { transform: scale(1.25); outline: none; }
+.dot:focus { outline: none; }
+.dot:focus-visible { transform: scale(1.25); }
+/* Only real mouse hovering enlarges a pin; on phones a tap would leave it stuck big. */
+@media (hover: hover) { .dot:hover { transform: scale(1.25); } }
 .dot.pending { background: var(--tint); animation: pulse 1s ease-in-out infinite; pointer-events: none; }
 .is-moving .dot { animation: pulse 1s ease-in-out infinite; }
 @keyframes pulse { 50% { transform: scale(1.4); } }
@@ -173,16 +176,22 @@ a.row-card-main:active { background: #EEF3F8; }
 /* The pin for the location you're looking at */
 /* The pin for the location you're on gently "breathes": a slow swell plus a soft glow in its own color. */
 .is-current { z-index: 2; }
-.is-current .dot { animation: breathe 2.4s ease-in-out infinite; }
-.is-current .dot::after {
-  content: ""; position: absolute; inset: -1px; border-radius: 50%;
-  background: currentColor; z-index: -1; pointer-events: none;
-  animation: glow 2.4s ease-in-out infinite;
+.is-current .dot { -webkit-animation: breathe 2.4s ease-in-out infinite; animation: breathe 2.4s ease-in-out infinite; }
+/* The glow is its own element under the pin (drawn first), which phone browsers handle reliably. */
+.pin-glow {
+  position: absolute; left: -7.5px; top: -7.5px; width: 15px; height: 15px; border-radius: 50%;
+  pointer-events: none; opacity: 0;
+  -webkit-animation: glow 2.4s ease-in-out infinite; animation: glow 2.4s ease-in-out infinite;
 }
+@-webkit-keyframes breathe { 50% { -webkit-transform: scale(1.12); transform: scale(1.12); } }
 @keyframes breathe { 50% { transform: scale(1.12); } }
-@keyframes glow { 0%, 100% { transform: scale(1); opacity: 0; } 50% { transform: scale(1.7); opacity: 0.3; } }
+@-webkit-keyframes glow { 0%, 100% { -webkit-transform: scale(1); opacity: 0; } 50% { -webkit-transform: scale(1.8); opacity: 0.35; } }
+@keyframes glow { 0%, 100% { transform: scale(1); opacity: 0; } 50% { transform: scale(1.8); opacity: 0.35; } }
+/* "Reduce motion" / power saving: no growing, just a soft glow fading in and out. */
+@keyframes glow-fade { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.4; } }
 @media (prefers-reduced-motion: reduce) {
-  .is-current .dot, .is-current .dot::after { animation: none; }
+  .is-current .dot { animation: none; }
+  .pin-glow { transform: scale(1.8); animation: glow-fade 2.4s ease-in-out infinite; }
 }
 .plan-canvas:not(.can-add) { cursor: default; }
 
