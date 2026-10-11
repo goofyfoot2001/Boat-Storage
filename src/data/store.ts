@@ -1,7 +1,7 @@
 // Everything the screens need to read and change data goes through here.
 // Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
 import { supabase } from "./supabase";
-import type { Boat, Container, Deck, Item, Location } from "./types";
+import type { Boat, Container, Deck, Item, ItemDocument, Location } from "./types";
 
 const PHOTOS = "photos";
 
@@ -66,6 +66,19 @@ async function removePhotos(paths: (string | null)[]) {
   real.forEach(p => urlCache.delete(p));
 }
 
+const DOCUMENTS = "documents";
+
+async function removeDocs(paths: string[]) {
+  if (paths.length) await supabase.storage.from(DOCUMENTS).remove(paths);
+}
+
+/** Storage paths of every document attached to these items. */
+async function docPathsForItems(itemIds: string[]) {
+  if (!itemIds.length) return [];
+  const rows = check(await supabase.from("item_documents").select("path").in("item_id", itemIds)) as { path: string }[];
+  return rows.map(r => r.path);
+}
+
 /** photo: a new Blob replaces the old one, null removes it, undefined leaves it alone. */
 async function replacePhoto(userId: string, oldPath: string | null, photo: Blob | null | undefined) {
   if (photo === undefined) return oldPath;
@@ -111,9 +124,10 @@ export async function deleteBoat(boat: Boat) {
   // The database removes the boat's decks, locations and items on its own;
   // their photos have to be cleared out of storage separately.
   const decks = check(await supabase.from("decks").select("id, photo_path").eq("boat_id", boat.id)) as { id: string; photo_path: string | null }[];
-  const itemPhotos = await itemPhotoPaths(decks.map(d => d.id));
+  const files = await filesOnDecks(decks.map(d => d.id));
   check(await supabase.from("boats").delete().eq("id", boat.id));
-  await removePhotos([boat.photoPath, ...decks.map(d => d.photo_path), ...itemPhotos]);
+  await removePhotos([boat.photoPath, ...decks.map(d => d.photo_path), ...files.photos]);
+  await removeDocs(files.docs);
 }
 
 export async function reorderBoats(boats: Boat[]) {
@@ -149,22 +163,31 @@ export async function updateDeck(deck: Deck, name: string, photo: Blob | null | 
 }
 
 export async function deleteDeck(deck: Deck) {
-  const itemPhotos = await itemPhotoPaths([deck.id]);
+  const files = await filesOnDecks([deck.id]);
   check(await supabase.from("decks").delete().eq("id", deck.id));
-  await removePhotos([deck.photoPath, ...itemPhotos]);
+  await removePhotos([deck.photoPath, ...files.photos]);
+  await removeDocs(files.docs);
 }
 
 export async function reorderDecks(decks: Deck[]) {
   await Promise.all(decks.map((d, i) => supabase.from("decks").update({ sort_order: i }).eq("id", d.id)));
 }
 
-/** Photos of every location, container and item on these decks, so they can be cleared out of storage. */
-async function itemPhotoPaths(deckIds: string[]) {
-  if (!deckIds.length) return [];
-  type Row = { photo_path: string | null; items: { photo_path: string | null }[]; containers: { photo_path: string | null }[] };
-  const rows = check(await supabase.from("locations").select("photo_path, items(photo_path), containers(photo_path)")
+/** Photos and documents of every location, container and item on these decks, so they can be cleared out of storage. */
+async function filesOnDecks(deckIds: string[]) {
+  if (!deckIds.length) return { photos: [], docs: [] };
+  type Row = {
+    photo_path: string | null;
+    items: { photo_path: string | null; item_documents: { path: string }[] }[];
+    containers: { photo_path: string | null }[];
+  };
+  const rows = check(await supabase.from("locations")
+    .select("photo_path, items(photo_path, item_documents(path)), containers(photo_path)")
     .in("deck_id", deckIds)) as Row[];
-  return rows.flatMap(r => [r.photo_path, ...r.items.map(i => i.photo_path), ...r.containers.map(c => c.photo_path)]);
+  return {
+    photos: rows.flatMap(r => [r.photo_path, ...r.items.map(i => i.photo_path), ...r.containers.map(c => c.photo_path)]),
+    docs: rows.flatMap(r => r.items.flatMap(i => i.item_documents.map(d => d.path))),
+  };
 }
 
 // ── Storage locations ───────────────────────────────────────────────────────
@@ -208,8 +231,10 @@ export async function moveLocation(id: string, x: number, y: number) {
 
 export async function deleteLocation(loc: Location) {
   const [items, containers] = await Promise.all([listItems(loc.id), listContainers(loc.id)]);
+  const docs = await docPathsForItems(items.map(i => i.id));
   check(await supabase.from("locations").delete().eq("id", loc.id));
   await removePhotos([loc.photoPath, ...items.map(i => i.photoPath), ...containers.map(c => c.photoPath)]);
+  await removeDocs(docs);
 }
 
 // ── Containers ──────────────────────────────────────────────────────────────
@@ -278,9 +303,11 @@ export async function deleteContainer(c: Container, mode: "keep" | "all", siblin
   }
   const tree = subtree(c, siblings);
   const ids = new Set(tree.map(t => t.id));
-  const photos = [...tree.map(t => t.photoPath), ...items.filter(i => i.containerId && ids.has(i.containerId)).map(i => i.photoPath)];
+  const inside = items.filter(i => i.containerId && ids.has(i.containerId));
+  const docs = await docPathsForItems(inside.map(i => i.id));
   check(await supabase.from("containers").delete().eq("id", c.id)); // the database removes everything inside
-  await removePhotos(photos);
+  await removePhotos([...tree.map(t => t.photoPath), ...inside.map(i => i.photoPath)]);
+  await removeDocs(docs);
 }
 
 // ── Stored items ────────────────────────────────────────────────────────────
@@ -288,14 +315,19 @@ export async function deleteContainer(c: Container, mode: "keep" | "all", siblin
 interface ItemRow {
   id: string; user_id: string; location_id: string; container_id: string | null; name: string; quantity: number;
   price: number | string | null; notes: string | null; photo_path: string | null;
+  item_documents?: { id: string; name: string }[];
 }
 const toItem = (r: ItemRow): Item => ({
   id: r.id, userId: r.user_id, locationId: r.location_id, containerId: r.container_id ?? null, name: r.name,
   quantity: r.quantity, price: r.price === null ? null : Number(r.price), notes: r.notes ?? "", photoPath: r.photo_path,
+  docs: r.item_documents ?? [],
 });
 
+/** Item columns plus the names of attached documents (for the 📎 count and search). */
+const ITEM_SELECT = "*, item_documents(id, name)";
+
 export async function listItems(locationId: string) {
-  const rows = check(await supabase.from("items").select("*").eq("location_id", locationId).order("name"));
+  const rows = check(await supabase.from("items").select(ITEM_SELECT).eq("location_id", locationId).order("name"));
   return (rows as ItemRow[]).map(toItem);
 }
 
@@ -321,7 +353,7 @@ export interface BoatContents {
 
 export async function boatContents(boatId: string): Promise<BoatContents> {
   const rows = check(await supabase.from("decks")
-    .select("id, name, sort_order, locations(id, name, color, items(*), containers(*))")
+    .select(`id, name, sort_order, locations(id, name, color, items(${ITEM_SELECT}), containers(*))`)
     .eq("boat_id", boatId).order("sort_order")) as {
       id: string; name: string;
       locations: { id: string; name: string; color: string; items: ItemRow[]; containers: ContainerRow[] }[];
@@ -336,9 +368,12 @@ export async function boatContents(boatId: string): Promise<BoatContents> {
   };
 }
 
+/** Returns the new item's id, so documents picked before saving can be attached to it. */
 export async function addItem(userId: string, locationId: string, containerId: string | null, f: ItemFields, photo: Blob | null) {
   const photo_path = photo ? await uploadPhoto(userId, photo) : null;
-  check(await supabase.from("items").insert({ location_id: locationId, container_id: containerId, ...itemColumns(f), photo_path }));
+  const row = check(await supabase.from("items")
+    .insert({ location_id: locationId, container_id: containerId, ...itemColumns(f), photo_path }).select("id").single());
+  return (row as { id: string }).id;
 }
 
 export async function updateItem(item: Item, f: ItemFields, photo: Blob | null | undefined) {
@@ -347,6 +382,54 @@ export async function updateItem(item: Item, f: ItemFields, photo: Blob | null |
 }
 
 export async function deleteItem(item: Item) {
+  const docs = await docPathsForItems([item.id]);
   check(await supabase.from("items").delete().eq("id", item.id));
   await removePhotos([item.photoPath]);
+  await removeDocs(docs);
+}
+
+// ── Documents attached to items ─────────────────────────────────────────────
+
+/** Supabase's free plan accepts uploads up to 50 MB. */
+export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
+
+interface DocumentRow { id: string; item_id: string; name: string; path: string; size: number; mime_type: string | null }
+const toDocument = (r: DocumentRow): ItemDocument => ({
+  id: r.id, itemId: r.item_id, name: r.name, path: r.path, size: Number(r.size), mimeType: r.mime_type,
+});
+
+export async function listDocuments(itemId: string) {
+  const rows = check(await supabase.from("item_documents").select("*").eq("item_id", itemId).order("name"));
+  return (rows as DocumentRow[]).map(toDocument);
+}
+
+export async function attachDocument(userId: string, itemId: string, file: File) {
+  if (file.size > MAX_DOCUMENT_BYTES) throw new Error(`“${file.name}” is bigger than 50 MB.`);
+  const ext = /\.([a-z0-9]{1,8})$/i.exec(file.name)?.[1]?.toLowerCase();
+  // Stored under a random name; the original file name is kept in the database for display.
+  const path = `${userId}/${itemId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`;
+  check(await supabase.storage.from(DOCUMENTS).upload(path, file, { contentType: file.type || "application/octet-stream" }));
+  const { error } = await supabase.from("item_documents").insert({
+    item_id: itemId, name: file.name.slice(0, 255), path, size: file.size, mime_type: file.type || null,
+  });
+  if (error) {
+    await removeDocs([path]); // don't leave an orphaned file behind
+    throw new Error(error.message);
+  }
+}
+
+export async function deleteDocument(doc: ItemDocument) {
+  check(await supabase.from("item_documents").delete().eq("id", doc.id));
+  await removeDocs([doc.path]);
+}
+
+/** Types a browser can show by itself; everything else is downloaded / handed to the phone's viewer. */
+const VIEWABLE = /^(application\/pdf|image\/|text\/plain)/;
+
+/** A short-lived private link to open or download the document. */
+export async function documentUrl(doc: ItemDocument) {
+  const viewInBrowser = !!doc.mimeType && VIEWABLE.test(doc.mimeType);
+  const res = await supabase.storage.from(DOCUMENTS)
+    .createSignedUrl(doc.path, 600, viewInBrowser ? undefined : { download: doc.name });
+  return check(res)!.signedUrl;
 }

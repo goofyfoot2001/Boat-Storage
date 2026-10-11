@@ -2,19 +2,23 @@ import { useState, type FormEvent } from "react";
 import type { ItemFields } from "../data/store";
 import type { Item } from "../data/types";
 import { targetValue, type Target } from "../lib/places";
+import { DocumentsField } from "./DocumentsField";
 import { Icon } from "./Icon";
 import { PhotoField } from "./PhotoField";
 import { PlaceSelect } from "./PlaceSelect";
 import { Sheet } from "./Sheet";
 
 /** Add/edit something stored at a location or in a container. */
-export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClose, onDelete }: {
+export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClose, onDelete, onDocsChanged }: {
   item?: Item;
   /** Where a new item is being added, e.g. "Red tote". */
   insideName?: string;
   /** Locations and containers on this boat the item can be moved to (editing only). */
   targets?: Target[];
-  onSubmit: (f: ItemFields, photo: Blob | null | undefined) => Promise<void>;
+  /** `newDocs`: documents picked for a new item, to attach once it's saved. */
+  onSubmit: (f: ItemFields, photo: Blob | null | undefined, newDocs: File[]) => Promise<void>;
+  /** A document was attached to / removed from a saved item. */
+  onDocsChanged?: () => void;
   onClose: () => void;
   onDelete?: () => void;
 }) {
@@ -25,6 +29,7 @@ export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClo
   const startPlace = item ? targetValue(item.locationId, item.containerId) : "";
   const [place, setPlace] = useState(startPlace);
   const [photo, setPhoto] = useState<Blob | null | undefined>(undefined);
+  const [newDocs, setNewDocs] = useState<File[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -41,7 +46,7 @@ export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClo
       await onSubmit({
         name, quantity: qty, price: cleanPrice ? Number(cleanPrice) : null, notes,
         place: moveTo ? { locationId: moveTo.locationId, containerId: moveTo.containerId } : undefined,
-      }, photo);
+      }, photo, newDocs);
       onClose();
     } catch {
       setError("Something went wrong saving. Please try again.");
@@ -84,6 +89,8 @@ export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClo
             placeholder="Part numbers, where you bought it, a link to reorder…" />
           <small className="field-hint">Web links you paste here become tappable.</small>
         </label>
+
+        <DocumentsField itemId={item?.id} queued={newDocs} onQueue={setNewDocs} onChanged={onDocsChanged} />
 
         {item && targets.length > 1 && (
           <PlaceSelect label="Stored in" targets={targets} value={place} onChange={setPlace}

@@ -43,6 +43,19 @@ export interface Item {
   price: number | null;
   notes: string;
   photoPath: string | null;
+  /** Attached documents (just enough for the 📎 count and search). */
+  docs: { id: string; name: string }[];
+}
+
+/** A manual, spreadsheet, receipt… attached to an item. */
+export interface ItemDocument {
+  id: string;
+  itemId: string;
+  /** Original file name, e.g. "Owner's Manual.pdf". */
+  name: string;
+  path: string;
+  size: number;
+  mimeType: string | null;
 }
 
 export interface Deck {

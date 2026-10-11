@@ -189,8 +189,9 @@ export function LocationPage() {
 
       {addingItem && (
         <StoredItemForm insideName={addingItem.containerId ? nameOf(addingItem) : undefined}
-          onSubmit={async (f, p) => {
-            await store.addItem(userId, loc.id, addingItem.containerId, f, p ?? null);
+          onSubmit={async (f, p, docs) => {
+            const itemId = await store.addItem(userId, loc.id, addingItem.containerId, f, p ?? null);
+            for (const d of docs) await store.attachDocument(userId, itemId, d);
             if (addingItem.containerId) setExpanded(prev => new Set([...prev, addingItem.containerId!]));
             await load();
           }}
@@ -210,6 +211,7 @@ export function LocationPage() {
       {editingItem && (
         <StoredItemForm item={editingItem} targets={targetsFor()}
           onSubmit={async (f, p) => { await store.updateItem(editingItem, f, p); await load(); }}
+          onDocsChanged={load}
           onDelete={() => { setDeletingItem(editingItem); setEditingItem(null); }}
           onClose={() => setEditingItem(null)} />
       )}
@@ -357,6 +359,11 @@ function ItemCard({ item, focused, onEdit }: { item: Item; focused: boolean; onE
         </div>
         <p className="item-meta">
           <span className="qty">Qty {item.quantity}</span>
+          {item.docs.length > 0 && (
+            <span className="doc-count" title={item.docs.map(d => d.name).join("\n")}>
+              <Icon name="paperclip" size={13} /> {item.docs.length}
+            </span>
+          )}
           {item.price != null && (
             <span>
               {formatPrice(item.price)} each

@@ -59,6 +59,7 @@ export function searchBoat(data: BoatContents, query: string) {
       [normalize(place.name), 4],
       [normalize(place.deckName), 2],
       [normalize(item.notes), 3],
+      [normalize(item.docs.map(d => d.name).join(" ")), 3],
       [item.price != null ? `${item.price} ${item.price.toFixed(2)} ${formatPrice(item.price).replace(/[$,]/g, "")}` : "", 2],
       [`qty ${item.quantity}`, 1],
     ]);

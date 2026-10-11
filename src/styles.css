@@ -240,6 +240,26 @@ mark { background: #FFE58A; color: inherit; border-radius: 3px; padding: 0 1px; 
 /* Keep a tall (portrait) deck picture from filling the whole phone screen. */
 .sticky-layout .plan-frame { max-height: 42vh; max-height: 42dvh; }
 
+/* ── Documents on items ─────────────────────────────────────────────── */
+.doc-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border); border-radius: 12px; background: #fff; overflow: hidden; }
+.doc-list li { display: flex; align-items: center; border-top: 1px solid var(--border); }
+.doc-list li:first-child { border-top: 0; }
+.doc-open {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 10px 8px 10px 10px; border: 0; background: none; text-align: left; font-size: 15px; color: var(--text);
+}
+button.doc-open:active { background: #EEF3F8; }
+.doc-badge {
+  flex: none; min-width: 42px; padding: 4px 4px; border-radius: 6px; text-align: center;
+  font-size: 10px; font-weight: 700; letter-spacing: 0.3px; background: var(--tint-soft); color: var(--tint);
+}
+.doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.doc-remove { flex: none; width: 44px; align-self: stretch; border: 0; background: none; color: var(--muted); }
+.doc-confirm { display: flex; gap: 6px; padding-right: 8px; }
+.doc-confirm .btn { min-height: 32px; padding: 0 10px; font-size: 13px; }
+.doc-uploading { opacity: 0.6; }
+.doc-count { display: inline-flex; align-items: center; gap: 3px; color: var(--text-2); font-weight: 600; }
+
 /* ── Containers (bins, totes, boxes) ────────────────────────────────── */
 .box-card { border-left: 5px solid; overflow: visible; }
 .box-head { display: flex; align-items: stretch; }
