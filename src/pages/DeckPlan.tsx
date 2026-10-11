@@ -82,7 +82,9 @@ export function DeckPlan() {
               <div className="hint banner">
                 <Icon name="map-pin" size={16} />
                 <span className="grow">
-                  {moving ? <>Tap the new spot for <strong>{moving.name}</strong></> : "Tap the layout where the new pin goes"}
+                  {moving
+                    ? <>Drag <strong>{moving.name}</strong> to its new spot, or tap the spot. Zoom in for precision.</>
+                    : "Tap the layout where the new pin goes"}
                 </span>
                 <button className="btn small" onClick={() => { setPlacing(false); setParams({}, { replace: true }); }}>Cancel</button>
               </div>
@@ -95,7 +97,8 @@ export function DeckPlan() {
             )}
 
             <DeckLayout photoUrl={photo} alt={`${deck.name} layout`} locations={locations}
-              movingId={movingId} pending={pending} onTapSpot={tapSpot} awaitingTap={!!moving || placing} />
+              movingId={movingId} pending={pending} onTapSpot={tapSpot} awaitingTap={!!moving || placing}
+              onDropPin={(x, y) => tapSpot(x, y)} />
 
             {locations.length > 0 && (
               <>

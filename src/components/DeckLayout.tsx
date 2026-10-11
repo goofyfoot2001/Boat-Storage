@@ -1,4 +1,4 @@
-import { useRef, useState, type MouseEvent } from "react";
+import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import type { Location } from "../data/types";
 import { plural } from "../lib/format";
@@ -19,16 +19,57 @@ interface Props {
   onTapSpot?: (x: number, y: number) => void;
   /** Dashed outline while waiting for the user to tap a spot. */
   awaitingTap?: boolean;
+  /** The moving pin was dragged and dropped here (0–1 picture coordinates). */
+  onDropPin?: (x: number, y: number) => void;
 }
 
 /** A deck picture with its storage pins, zoomable inside a fixed frame. */
-export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pending, onTapSpot, awaitingTap }: Props) {
+export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pending, onTapSpot, awaitingTap, onDropPin }: Props) {
   const navigate = useNavigate();
   const zoom = usePanZoom();
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const pointerType = useRef("mouse");
+  const canvasRef = useRef<HTMLDivElement>(null);
+  // While the moving pin is being dragged: where it is now, and where the drag started.
+  const [drag, setDrag] = useState<{ x: number; y: number } | null>(null);
+  const dragStart = useRef<{ px: number; py: number; moved: boolean } | null>(null);
   const inverse = `scale(${1 / zoom.view.scale})`; // keeps pins the same size while zooming
+
+  /** Screen point → 0–1 position on the picture (works at any zoom). */
+  function toPicture(clientX: number, clientY: number) {
+    const box = canvasRef.current!.getBoundingClientRect();
+    return { x: clamp((clientX - box.left) / box.width), y: clamp((clientY - box.top) / box.height) };
+  }
+
+  const dragHandlers = {
+    onPointerDown(e: PointerEvent<HTMLButtonElement>) {
+      e.stopPropagation(); // don't start panning the picture
+      dragStart.current = { px: e.clientX, py: e.clientY, moved: false };
+      // Keep getting moves even if the finger slides off the small pin.
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* pointer already gone */ }
+    },
+    onPointerMove(e: PointerEvent<HTMLButtonElement>) {
+      const s = dragStart.current;
+      if (!s) return;
+      if (!s.moved && Math.hypot(e.clientX - s.px, e.clientY - s.py) < 4) return;
+      s.moved = true;
+      setDrag(toPicture(e.clientX, e.clientY));
+    },
+    onPointerUp(e: PointerEvent<HTMLButtonElement>) {
+      const s = dragStart.current;
+      dragStart.current = null;
+      if (s?.moved) {
+        const spot = toPicture(e.clientX, e.clientY);
+        setDrag(null);
+        onDropPin?.(spot.x, spot.y);
+      }
+    },
+    onPointerCancel() {
+      dragStart.current = null;
+      setDrag(null);
+    },
+  };
 
   function tapPicture(e: MouseEvent<HTMLDivElement>) {
     if (zoom.wasGesture()) return; // that was a pinch or drag, not a tap
@@ -54,23 +95,29 @@ export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pend
       <div className={`plan-frame${zoom.view.scale > 1 ? " zoomed" : ""}`} ref={zoom.frameRef}
         {...zoom.handlers}
         onPointerDown={e => { pointerType.current = e.pointerType; zoom.handlers.onPointerDown(e); }}>
-        <div className={`plan-canvas${onTapSpot ? " can-add" : ""}`} onClick={tapPicture}
+        <div ref={canvasRef} className={`plan-canvas${onTapSpot ? " can-add" : ""}`} onClick={tapPicture}
           style={{ transform: `translate(${zoom.view.x}px, ${zoom.view.y}px) scale(${zoom.view.scale})` }}>
           <img src={photoUrl} alt={alt} draggable={false} />
-          {locations.map(loc => (
+          {locations.map(loc => {
+            const isMoving = loc.id === movingId;
+            const at = isMoving && drag ? drag : loc;
+            return (
             <div key={loc.id} className={[
               "dot-wrap",
               loc.y < 0.18 && "label-below",
               loc.x < 0.25 && "label-start",
               loc.x > 0.75 && "label-end",
-              loc.id === movingId && "is-moving",
+              isMoving && "is-moving",
+              isMoving && drag && "is-dragging",
               loc.id === currentId && "is-current",
             ].filter(Boolean).join(" ")}
-              style={{ left: `${loc.x * 100}%`, top: `${loc.y * 100}%`, transform: inverse }}>
+              style={{ left: `${at.x * 100}%`, top: `${at.y * 100}%`, transform: inverse }}>
               {loc.id === currentId && <span className="pin-glow" style={{ background: loc.color }} aria-hidden="true" />}
               <button className="dot" style={{ background: loc.color }}
-                aria-label={`${loc.name}, ${plural(loc.itemCount, "item")}${loc.id === currentId ? " (you are here)" : ""}`}
-                onPointerDown={e => (pointerType.current = e.pointerType)}
+                aria-label={`${loc.name}, ${plural(loc.itemCount, "item")}${loc.id === currentId ? " (you are here)" : ""}${isMoving ? " (drag to move)" : ""}`}
+                {...(isMoving && onDropPin ? dragHandlers : {
+                  onPointerDown: (e: PointerEvent<HTMLButtonElement>) => (pointerType.current = e.pointerType),
+                })}
                 onPointerEnter={e => e.pointerType === "mouse" && setHovered(loc.id)}
                 onPointerLeave={() => setHovered(h => (h === loc.id ? null : h))}
                 onFocus={() => setHovered(loc.id)} onBlur={() => setHovered(null)}
@@ -85,7 +132,8 @@ export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pend
                 </Link>
               ))}
             </div>
-          ))}
+            );
+          })}
           {pending && (
             <div className="dot-wrap" style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%`, transform: inverse }}>
               <span className="dot pending" />

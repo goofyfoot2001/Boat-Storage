@@ -148,7 +148,11 @@ a.row-card-main:active { background: #EEF3F8; }
 /* Only real mouse hovering enlarges a pin; on phones a tap would leave it stuck big. */
 @media (hover: hover) { .dot:hover { transform: scale(1.25); } }
 .dot.pending { background: var(--tint); animation: pulse 1s ease-in-out infinite; pointer-events: none; }
-.is-moving .dot { animation: pulse 1s ease-in-out infinite; }
+.is-moving .dot { animation: pulse 1s ease-in-out infinite; touch-action: none; cursor: grab; }
+/* Bigger grab area for the pin being moved, and it stops pulsing while you drag it. */
+.is-moving .dot::before { inset: -18px; }
+.is-dragging { z-index: 5; }
+.is-dragging .dot { animation: none; transform: scale(1.5); cursor: grabbing; box-shadow: 0 4px 12px rgb(0 0 0 / 0.45); }
 @keyframes pulse { 50% { transform: scale(1.4); } }
 
 .dot-label {
