@@ -25,10 +25,13 @@ export function usePanZoom() {
     if (!frame) return v;
     const scale = Math.min(MAX_SCALE, Math.max(1, v.scale));
     const w = frame.clientWidth, h = frame.clientHeight;
+    // The picture can be taller than the frame (tall deck plans), so use its own size.
+    const content = frame.firstElementChild as HTMLElement | null;
+    const cw = content?.offsetWidth ?? w, ch = content?.offsetHeight ?? h;
     return {
       scale,
-      x: Math.min(0, Math.max(w - w * scale, v.x)),
-      y: Math.min(0, Math.max(h - h * scale, v.y)),
+      x: Math.min(0, Math.max(w - cw * scale, v.x)),
+      y: Math.min(0, Math.max(h - ch * scale, v.y)),
     };
   }, []);
 

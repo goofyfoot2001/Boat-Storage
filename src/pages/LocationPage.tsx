@@ -65,6 +65,8 @@ export function LocationPage() {
 
   return (
     <div className="page">
+      {/* Header and deck picture stay put at the top; only the items below scroll. */}
+      <div className="sticky-top">
       <AppHeader backTo={`/decks/${loc.deckId}`} title={loc.name} subtitle={subtitle}
         right={
           <>
@@ -82,13 +84,16 @@ export function LocationPage() {
           </>
         }
       />
+      {deckPhoto && (
+        <div className="sticky-layout">
+          <DeckLayout photoUrl={deckPhoto} alt={`${deck?.name} layout`} locations={deckPins} currentId={loc.id} />
+        </div>
+      )}
+      </div>
 
       <section className="list">
-        {deckPhoto && (
-          <>
-            <DeckLayout photoUrl={deckPhoto} alt={`${deck?.name} layout`} locations={deckPins} currentId={loc.id} />
-            {deckPins.length > 1 && <p className="hint"><Icon name="map-pin" size={14} /> Tap another pin to jump to that location.</p>}
-          </>
+        {deckPhoto && deckPins.length > 1 && (
+          <p className="hint"><Icon name="map-pin" size={14} /> Tap another pin to jump to that location.</p>
         )}
 
         {photo && <img className="loc-photo" src={photo} alt={loc.name} style={{ borderColor: loc.color }} />}
