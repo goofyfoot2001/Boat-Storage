@@ -158,12 +158,15 @@ export function LocationPage() {
 function ItemCard({ item, focused, onEdit }: { item: Item; focused: boolean; onEdit: () => void }) {
   const photo = usePhotoUrl(item.photoPath);
   return (
-    <div className={`card item-card${focused ? " flash" : ""}`} id={`item-${item.id}`}>
+    // The whole card opens the item; links in the description open the link instead (Linkify stops the tap).
+    <div className={`card item-card tappable${focused ? " flash" : ""}`} id={`item-${item.id}`}
+      role="button" tabIndex={0} aria-label={`Open ${item.name}`} onClick={onEdit}
+      onKeyDown={e => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}>
       {photo && <img className="item-photo" src={photo} alt="" />}
       <div className="item-body">
         <div className="item-head">
           <h3>{item.name}</h3>
-          <button className="icon-btn small" onClick={onEdit} aria-label={`Edit ${item.name}`}><Icon name="edit" size={16} /></button>
+          <Icon name="chevron-right" size={18} color="var(--muted)" />
         </div>
         <p className="item-meta">
           <span className="qty">Qty {item.quantity}</span>
