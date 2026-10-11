@@ -63,6 +63,7 @@ img { display: block; max-width: 100%; }
 .hint.centered { justify-content: center; background: none; }
 
 .account { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 36px; font-size: 13px; color: var(--muted); }
+.version { font-size: 11px; opacity: 0.7; }
 
 /* ── Buttons ────────────────────────────────────────────────────────── */
 .icon-btn {
@@ -178,8 +179,8 @@ a.row-card-main:active { background: #EEF3F8; }
   background: currentColor; z-index: -1; pointer-events: none;
   animation: glow 2.4s ease-in-out infinite;
 }
-@keyframes breathe { 50% { transform: scale(1.22); } }
-@keyframes glow { 0%, 100% { transform: scale(1); opacity: 0; } 50% { transform: scale(2.1); opacity: 0.35; } }
+@keyframes breathe { 50% { transform: scale(1.12); } }
+@keyframes glow { 0%, 100% { transform: scale(1); opacity: 0; } 50% { transform: scale(1.7); opacity: 0.3; } }
 @media (prefers-reduced-motion: reduce) {
   .is-current .dot, .is-current .dot::after { animation: none; }
 }

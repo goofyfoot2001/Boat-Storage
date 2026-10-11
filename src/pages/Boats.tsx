@@ -76,6 +76,7 @@ export function Boats() {
       <footer className="account">
         <span>Signed in as {session?.email}</span>
         <button className="btn link small" onClick={signOut}><Icon name="log-out" size={16} /> Sign out</button>
+        <span className="version">Version {__BUILD__}</span>
       </footer>
 
       {adding && (
