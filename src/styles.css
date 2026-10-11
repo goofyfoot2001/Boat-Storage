@@ -240,6 +240,32 @@ mark { background: #FFE58A; color: inherit; border-radius: 3px; padding: 0 1px; 
 /* Keep a tall (portrait) deck picture from filling the whole phone screen. */
 .sticky-layout .plan-frame { max-height: 42vh; max-height: 42dvh; }
 
+/* ── Containers (bins, totes, boxes) ────────────────────────────────── */
+.box-card { border-left: 5px solid; overflow: visible; }
+.box-head { display: flex; align-items: stretch; }
+.box-toggle {
+  flex: 1; min-width: 0; display: flex; align-items: center; gap: 10px;
+  padding: 10px 6px 10px 8px; border: 0; background: none; text-align: left;
+}
+.box-toggle:active { background: #EEF3F8; }
+.box-toggle > svg { flex: none; color: var(--muted); transition: transform 0.15s; }
+.box-card.open > .box-head .box-toggle > svg { transform: rotate(90deg); }
+.box-toggle .card-text h3 { font-size: 16px; }
+.box-toggle .card-text p { font-size: 13px; margin-top: 1px; }
+.box-head .card-edit { border-left: 1px solid var(--border); }
+.box-contents {
+  display: flex; flex-direction: column; gap: 8px;
+  padding: 4px 8px 10px 14px; margin-left: 12px; border-left: 2px dashed var(--border);
+}
+.box-contents .card { box-shadow: 0 1px 4px rgb(10 22 40 / 0.06); border: 1px solid var(--border); }
+.box-contents .box-card { border-left-width: 5px; }
+.box-notes { font-size: 14px; color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere; }
+.box-notes a { color: var(--tint); text-decoration: underline; }
+.box-empty { padding: 2px 0; }
+.box-add .btn { flex: 1; min-height: 36px; font-size: 14px; }
+.box-tag { width: 22px; height: 22px; border-radius: 6px; display: grid; place-items: center; flex: none; }
+.choice { display: flex; flex-direction: column; gap: 10px; padding-bottom: 6px; }
+
 /* ── Location page ──────────────────────────────────────────────────── */
 .loc-photo { width: 100%; max-height: 260px; object-fit: cover; border-radius: var(--radius); border-bottom: 5px solid; }
 

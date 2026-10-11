@@ -19,11 +19,25 @@ export interface Location {
   itemCount: number;
 }
 
-/** Something stored at a location. */
+/** A bin, tote or box in a location. Containers can sit inside other containers. */
+export interface Container {
+  id: string;
+  userId: string;
+  locationId: string;
+  /** The container this one sits in, or null if it sits directly in the location. */
+  parentId: string | null;
+  name: string;
+  notes: string;
+  color: string;
+  photoPath: string | null;
+}
+
+/** Something stored at a location, loose or inside a container. */
 export interface Item {
   id: string;
   userId: string;
   locationId: string;
+  containerId: string | null;
   name: string;
   quantity: number;
   price: number | null;

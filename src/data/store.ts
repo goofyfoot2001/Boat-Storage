@@ -1,7 +1,7 @@
 // Everything the screens need to read and change data goes through here.
 // Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
 import { supabase } from "./supabase";
-import type { Boat, Deck, Item, Location } from "./types";
+import type { Boat, Container, Deck, Item, Location } from "./types";
 
 const PHOTOS = "photos";
 
@@ -158,12 +158,13 @@ export async function reorderDecks(decks: Deck[]) {
   await Promise.all(decks.map((d, i) => supabase.from("decks").update({ sort_order: i }).eq("id", d.id)));
 }
 
-/** Photos of every location and item on these decks, so they can be cleared out of storage. */
+/** Photos of every location, container and item on these decks, so they can be cleared out of storage. */
 async function itemPhotoPaths(deckIds: string[]) {
   if (!deckIds.length) return [];
-  const rows = check(await supabase.from("locations").select("photo_path, items(photo_path)")
-    .in("deck_id", deckIds)) as { photo_path: string | null; items: { photo_path: string | null }[] }[];
-  return rows.flatMap(r => [r.photo_path, ...r.items.map(i => i.photo_path)]);
+  type Row = { photo_path: string | null; items: { photo_path: string | null }[]; containers: { photo_path: string | null }[] };
+  const rows = check(await supabase.from("locations").select("photo_path, items(photo_path), containers(photo_path)")
+    .in("deck_id", deckIds)) as Row[];
+  return rows.flatMap(r => [r.photo_path, ...r.items.map(i => i.photo_path), ...r.containers.map(c => c.photo_path)]);
 }
 
 // ── Storage locations ───────────────────────────────────────────────────────
@@ -206,20 +207,91 @@ export async function moveLocation(id: string, x: number, y: number) {
 }
 
 export async function deleteLocation(loc: Location) {
-  const items = await listItems(loc.id);
+  const [items, containers] = await Promise.all([listItems(loc.id), listContainers(loc.id)]);
   check(await supabase.from("locations").delete().eq("id", loc.id));
-  await removePhotos([loc.photoPath, ...items.map(i => i.photoPath)]);
+  await removePhotos([loc.photoPath, ...items.map(i => i.photoPath), ...containers.map(c => c.photoPath)]);
+}
+
+// ── Containers ──────────────────────────────────────────────────────────────
+
+interface ContainerRow {
+  id: string; user_id: string; location_id: string; parent_id: string | null; name: string;
+  notes: string | null; color: string; photo_path: string | null;
+}
+const toContainer = (r: ContainerRow): Container => ({
+  id: r.id, userId: r.user_id, locationId: r.location_id, parentId: r.parent_id, name: r.name,
+  notes: r.notes ?? "", color: r.color, photoPath: r.photo_path,
+});
+
+export async function listContainers(locationId: string) {
+  const rows = check(await supabase.from("containers").select("*").eq("location_id", locationId).order("name"));
+  return (rows as ContainerRow[]).map(toContainer);
+}
+
+export interface ContainerFields { name: string; notes: string; color: string }
+
+const containerColumns = (f: ContainerFields) => ({ name: f.name.trim(), notes: f.notes.trim() || null, color: f.color });
+
+export async function addContainer(userId: string, locationId: string, parentId: string | null, f: ContainerFields, photo: Blob | null) {
+  const photo_path = photo ? await uploadPhoto(userId, photo) : null;
+  check(await supabase.from("containers").insert({ location_id: locationId, parent_id: parentId, ...containerColumns(f), photo_path }));
+}
+
+export async function updateContainer(c: Container, f: ContainerFields, photo: Blob | null | undefined) {
+  const photo_path = await replacePhoto(c.userId, c.photoPath, photo);
+  check(await supabase.from("containers").update({ ...containerColumns(f), photo_path }).eq("id", c.id));
+}
+
+/** `c` and every container inside it, parents before children. */
+export function subtree(c: Container, all: Container[]): Container[] {
+  const out = [c];
+  for (let i = 0; i < out.length; i++) out.push(...all.filter(x => x.parentId === out[i].id));
+  return out;
+}
+
+/**
+ * Put a container (with everything in it) somewhere else: another container, the location
+ * itself, or a different location. `siblings` is every container in its current location.
+ */
+export async function moveContainer(c: Container, to: { locationId: string; parentId: string | null }, siblings: Container[]) {
+  const tree = subtree(c, siblings);
+  if (to.parentId && tree.some(t => t.id === to.parentId)) throw new Error("A container can't go inside itself.");
+  check(await supabase.from("containers").update({ location_id: to.locationId, parent_id: to.parentId }).eq("id", c.id));
+  if (to.locationId === c.locationId) return;
+  // Changing location: the security rules want each container's parent to be in the same location,
+  // so move the rest one at a time, parents first, then the items inside them.
+  for (const t of tree.slice(1)) check(await supabase.from("containers").update({ location_id: to.locationId }).eq("id", t.id));
+  check(await supabase.from("items").update({ location_id: to.locationId }).in("container_id", tree.map(t => t.id)));
+}
+
+/**
+ * Delete a container. "keep" moves what's inside out one level (into its parent container or the
+ * location); "all" deletes everything inside it too.
+ */
+export async function deleteContainer(c: Container, mode: "keep" | "all", siblings: Container[], items: Item[]) {
+  if (mode === "keep") {
+    check(await supabase.from("items").update({ container_id: c.parentId }).eq("container_id", c.id));
+    check(await supabase.from("containers").update({ parent_id: c.parentId }).eq("parent_id", c.id));
+    check(await supabase.from("containers").delete().eq("id", c.id));
+    await removePhotos([c.photoPath]);
+    return;
+  }
+  const tree = subtree(c, siblings);
+  const ids = new Set(tree.map(t => t.id));
+  const photos = [...tree.map(t => t.photoPath), ...items.filter(i => i.containerId && ids.has(i.containerId)).map(i => i.photoPath)];
+  check(await supabase.from("containers").delete().eq("id", c.id)); // the database removes everything inside
+  await removePhotos(photos);
 }
 
 // ── Stored items ────────────────────────────────────────────────────────────
 
 interface ItemRow {
-  id: string; user_id: string; location_id: string; name: string; quantity: number;
+  id: string; user_id: string; location_id: string; container_id: string | null; name: string; quantity: number;
   price: number | string | null; notes: string | null; photo_path: string | null;
 }
 const toItem = (r: ItemRow): Item => ({
-  id: r.id, userId: r.user_id, locationId: r.location_id, name: r.name, quantity: r.quantity,
-  price: r.price === null ? null : Number(r.price), notes: r.notes ?? "", photoPath: r.photo_path,
+  id: r.id, userId: r.user_id, locationId: r.location_id, containerId: r.container_id ?? null, name: r.name,
+  quantity: r.quantity, price: r.price === null ? null : Number(r.price), notes: r.notes ?? "", photoPath: r.photo_path,
 });
 
 export async function listItems(locationId: string) {
@@ -229,41 +301,44 @@ export async function listItems(locationId: string) {
 
 export interface ItemFields {
   name: string; quantity: number; price: number | null; notes: string;
-  /** Set to move the item to another location. */
-  locationId?: string;
+  /** Set to put the item somewhere else: a location, and optionally a container in it. */
+  place?: { locationId: string; containerId: string | null };
 }
 
 const itemColumns = (f: ItemFields) => ({
   name: f.name.trim(), quantity: f.quantity, price: f.price, notes: f.notes.trim() || null,
-  ...(f.locationId ? { location_id: f.locationId } : {}),
+  ...(f.place ? { location_id: f.place.locationId, container_id: f.place.containerId } : {}),
 });
 
-// ── Everything on one boat (search, moving items) ───────────────────────────
+// ── Everything on one boat (search, moving things) ──────────────────────────
 
 export interface BoatContents {
   decks: { id: string; name: string }[];
   locations: { id: string; name: string; color: string; deckId: string; deckName: string }[];
+  containers: Container[];
   items: Item[];
 }
 
 export async function boatContents(boatId: string): Promise<BoatContents> {
   const rows = check(await supabase.from("decks")
-    .select("id, name, sort_order, locations(id, name, color, items(*))")
+    .select("id, name, sort_order, locations(id, name, color, items(*), containers(*))")
     .eq("boat_id", boatId).order("sort_order")) as {
       id: string; name: string;
-      locations: { id: string; name: string; color: string; items: ItemRow[] }[];
+      locations: { id: string; name: string; color: string; items: ItemRow[]; containers: ContainerRow[] }[];
     }[];
   return {
     decks: rows.map(d => ({ id: d.id, name: d.name })),
     locations: rows.flatMap(d => d.locations.map(l => ({ id: l.id, name: l.name, color: l.color, deckId: d.id, deckName: d.name })))
       .sort((a, b) => a.deckName.localeCompare(b.deckName) || a.name.localeCompare(b.name)),
+    containers: rows.flatMap(d => d.locations.flatMap(l => l.containers.map(toContainer)))
+      .sort((a, b) => a.name.localeCompare(b.name)),
     items: rows.flatMap(d => d.locations.flatMap(l => l.items.map(toItem))),
   };
 }
 
-export async function addItem(userId: string, locationId: string, f: ItemFields, photo: Blob | null) {
+export async function addItem(userId: string, locationId: string, containerId: string | null, f: ItemFields, photo: Blob | null) {
   const photo_path = photo ? await uploadPhoto(userId, photo) : null;
-  check(await supabase.from("items").insert({ location_id: locationId, ...itemColumns(f), photo_path }));
+  check(await supabase.from("items").insert({ location_id: locationId, container_id: containerId, ...itemColumns(f), photo_path }));
 }
 
 export async function updateItem(item: Item, f: ItemFields, photo: Blob | null | undefined) {

@@ -1,11 +1,13 @@
 import type { BoatContents } from "../data/store";
-import type { Item } from "../data/types";
+import type { Container, Item } from "../data/types";
 import { formatPrice } from "./format";
+import { containerPath } from "./places";
 
 export type Place = BoatContents["locations"][number];
 
-export interface ItemHit { item: Item; place: Place; score: number }
+export interface ItemHit { item: Item; place: Place; path: Container[]; score: number }
 export interface PlaceHit { place: Place; itemCount: number; score: number }
+export interface ContainerHit { container: Container; place: Place; path: Container[]; itemCount: number; score: number }
 
 /** Lower-case and strip accents so "Café" matches "cafe". */
 export const normalize = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
@@ -24,47 +26,76 @@ function wordScore(text: string, term: string): number {
   return startsWord && endsWord ? 3 : startsWord ? 2 : 1;
 }
 
+/** Every word must match one of the weighted fields; returns the total score, or 0 if any word misses. */
+function scoreAll(words: string[], fields: [string, number][]) {
+  let score = 0;
+  for (const w of words) {
+    const best = Math.max(...fields.map(([text, weight]) => wordScore(text, w) * weight));
+    if (!best) return 0;
+    score += best;
+  }
+  return score;
+}
+
 /**
- * Every search word has to appear somewhere (name, description, price, quantity,
- * location or deck). Matches in the item's own name rank highest.
+ * Every search word has to appear somewhere (name, description, price, quantity, the
+ * containers it's in, location or deck). Matches in the thing's own name rank highest.
  */
 export function searchBoat(data: BoatContents, query: string) {
   const words = terms(query);
-  if (!words.length) return { items: [] as ItemHit[], places: [] as PlaceHit[] };
+  const empty = { items: [] as ItemHit[], places: [] as PlaceHit[], containers: [] as ContainerHit[] };
+  if (!words.length) return empty;
   const places = new Map(data.locations.map(l => [l.id, l]));
+  const pathText = (path: Container[]) => normalize(path.map(c => c.name).join(" "));
 
   const items: ItemHit[] = [];
   for (const item of data.items) {
     const place = places.get(item.locationId);
     if (!place) continue;
-    const fields: [string, number][] = [
+    const path = containerPath(item.containerId, data.containers);
+    const score = scoreAll(words, [
       [normalize(item.name), 10],
+      [pathText(path), 4],
       [normalize(place.name), 4],
       [normalize(place.deckName), 2],
       [normalize(item.notes), 3],
       [item.price != null ? `${item.price} ${item.price.toFixed(2)} ${formatPrice(item.price).replace(/[$,]/g, "")}` : "", 2],
       [`qty ${item.quantity}`, 1],
-    ];
-    let score = 0;
-    let all = true;
-    for (const w of words) {
-      const best = Math.max(...fields.map(([text, weight]) => wordScore(text, w) * weight));
-      if (!best) { all = false; break; }
-      score += best;
-    }
-    if (all) items.push({ item, place, score });
+    ]);
+    if (score) items.push({ item, place, path, score });
   }
 
-  const counts = new Map<string, number>();
-  data.items.forEach(i => counts.set(i.locationId, (counts.get(i.locationId) ?? 0) + 1));
+  // How many items are in each location / container (including containers inside it).
+  const locCounts = new Map<string, number>();
+  const conCounts = new Map<string, number>();
+  for (const i of data.items) {
+    locCounts.set(i.locationId, (locCounts.get(i.locationId) ?? 0) + 1);
+    for (const c of containerPath(i.containerId, data.containers)) conCounts.set(c.id, (conCounts.get(c.id) ?? 0) + 1);
+  }
+
+  const containers: ContainerHit[] = [];
+  for (const container of data.containers) {
+    const place = places.get(container.locationId);
+    if (!place) continue;
+    const path = containerPath(container.parentId, data.containers);
+    const score = scoreAll(words, [
+      [normalize(container.name), 10],
+      [normalize(container.notes), 3],
+      [pathText(path), 3],
+      [normalize(place.name), 3],
+      [normalize(place.deckName), 1],
+    ]);
+    if (score) containers.push({ container, place, path, itemCount: conCounts.get(container.id) ?? 0, score });
+  }
+
   const placeHits: PlaceHit[] = [];
   for (const place of data.locations) {
-    const text = `${normalize(place.name)} ${normalize(place.deckName)}`;
-    const scores = words.map(w => wordScore(text, w));
-    if (scores.every(Boolean)) placeHits.push({ place, itemCount: counts.get(place.id) ?? 0, score: scores.reduce((a, b) => a + b, 0) });
+    const score = scoreAll(words, [[normalize(place.name), 2], [normalize(place.deckName), 1]]);
+    if (score) placeHits.push({ place, itemCount: locCounts.get(place.id) ?? 0, score });
   }
 
   items.sort((a, b) => b.score - a.score || a.item.name.localeCompare(b.item.name));
+  containers.sort((a, b) => b.score - a.score || a.container.name.localeCompare(b.container.name));
   placeHits.sort((a, b) => b.score - a.score || a.place.name.localeCompare(b.place.name));
-  return { items, places: placeHits };
+  return { items, places: placeHits, containers };
 }

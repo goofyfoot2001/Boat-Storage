@@ -70,6 +70,25 @@ export function SearchPage() {
               </>
             )}
 
+            {results.containers.length > 0 && (
+              <>
+                <h2 className="section-title">Containers</h2>
+                <div className="card">
+                  {results.containers.map(({ container, place, path, itemCount }) => (
+                    <Link key={container.id} to={`/locations/${place.id}?container=${container.id}`} className="loc-row">
+                      <span className="box-tag" style={{ background: container.color }}><Icon name="box" size={13} color="#fff" /></span>
+                      <span className="grow">
+                        <Highlight text={container.name} words={words} />
+                        <span className="muted"> · {[place.name, ...path.map(p => p.name)].join(" › ")}</span>
+                      </span>
+                      <span className="muted">{plural(itemCount, "item")}</span>
+                      <Icon name="chevron-right" size={16} color="var(--muted)" />
+                    </Link>
+                  ))}
+                </div>
+              </>
+            )}
+
             <h2 className="section-title">{plural(results.items.length, "item")} found</h2>
             {results.items.length === 0 && (
               <p className="hint centered">Nothing matches “{query.trim()}”. Try fewer or shorter words.</p>
@@ -82,7 +101,7 @@ export function SearchPage() {
   );
 }
 
-function ResultRow({ hit: { item, place }, words }: { hit: ItemHit; words: string[] }) {
+function ResultRow({ hit: { item, place, path }, words }: { hit: ItemHit; words: string[] }) {
   const photo = usePhotoUrl(item.photoPath);
   return (
     <Link to={`/locations/${place.id}?item=${item.id}`} className="card result">
@@ -91,7 +110,11 @@ function ResultRow({ hit: { item, place }, words }: { hit: ItemHit; words: strin
         <h3><Highlight text={item.name} words={words} /></h3>
         <p className="result-place">
           <span className="loc-swatch" style={{ background: place.color }} />
-          <Highlight text={place.name} words={words} /> · <Highlight text={place.deckName} words={words} />
+          <span>
+            <Highlight text={place.name} words={words} />
+            {path.map(c => <span key={c.id}> › <Highlight text={c.name} words={words} /></span>)}
+            {" · "}<Highlight text={place.deckName} words={words} />
+          </span>
         </p>
         <p>
           Qty {item.quantity}

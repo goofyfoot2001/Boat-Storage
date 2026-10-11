@@ -1,16 +1,19 @@
 import { useState, type FormEvent } from "react";
 import type { ItemFields } from "../data/store";
 import type { Item } from "../data/types";
-import type { Place } from "../lib/search";
+import { targetValue, type Target } from "../lib/places";
 import { Icon } from "./Icon";
 import { PhotoField } from "./PhotoField";
+import { PlaceSelect } from "./PlaceSelect";
 import { Sheet } from "./Sheet";
 
-/** Add/edit something stored at a location. */
-export function StoredItemForm({ item, places = [], onSubmit, onClose, onDelete }: {
+/** Add/edit something stored at a location or in a container. */
+export function StoredItemForm({ item, insideName, targets = [], onSubmit, onClose, onDelete }: {
   item?: Item;
-  /** Locations on this boat the item can be moved to (editing only). */
-  places?: Place[];
+  /** Where a new item is being added, e.g. "Red tote". */
+  insideName?: string;
+  /** Locations and containers on this boat the item can be moved to (editing only). */
+  targets?: Target[];
   onSubmit: (f: ItemFields, photo: Blob | null | undefined) => Promise<void>;
   onClose: () => void;
   onDelete?: () => void;
@@ -19,7 +22,8 @@ export function StoredItemForm({ item, places = [], onSubmit, onClose, onDelete 
   const [quantity, setQuantity] = useState(String(item?.quantity ?? 1));
   const [price, setPrice] = useState(item?.price != null ? item.price.toFixed(2) : "");
   const [notes, setNotes] = useState(item?.notes ?? "");
-  const [locationId, setLocationId] = useState(item?.locationId ?? "");
+  const startPlace = item ? targetValue(item.locationId, item.containerId) : "";
+  const [place, setPlace] = useState(startPlace);
   const [photo, setPhoto] = useState<Blob | null | undefined>(undefined);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -33,9 +37,10 @@ export function StoredItemForm({ item, places = [], onSubmit, onClose, onDelete 
     if (cleanPrice && !/^\d+(\.\d{1,2})?$/.test(cleanPrice)) return setError("Price should look like 24.99");
     setBusy(true);
     try {
+      const moveTo = place !== startPlace ? targets.find(t => t.value === place) : undefined;
       await onSubmit({
         name, quantity: qty, price: cleanPrice ? Number(cleanPrice) : null, notes,
-        locationId: item && locationId !== item.locationId ? locationId : undefined,
+        place: moveTo ? { locationId: moveTo.locationId, containerId: moveTo.containerId } : undefined,
       }, photo);
       onClose();
     } catch {
@@ -47,6 +52,7 @@ export function StoredItemForm({ item, places = [], onSubmit, onClose, onDelete 
   return (
     <Sheet title={item ? "Edit item" : "Add item"} onClose={onClose}>
       <form onSubmit={submit} className="form">
+        {insideName && <p className="hint"><Icon name="box" size={14} /> Goes in {insideName}</p>}
         <label className="field">
           <span>What is it?</span>
           <input value={name} onChange={e => setName(e.target.value)} placeholder="e.g. Spare impeller"
@@ -79,18 +85,9 @@ export function StoredItemForm({ item, places = [], onSubmit, onClose, onDelete 
           <small className="field-hint">Web links you paste here become tappable.</small>
         </label>
 
-        {item && places.length > 1 && (
-          <label className="field">
-            <span>Stored at</span>
-            <select value={locationId} onChange={e => setLocationId(e.target.value)}>
-              {[...new Set(places.map(p => p.deckName))].map(deckName => (
-                <optgroup key={deckName} label={deckName}>
-                  {places.filter(p => p.deckName === deckName).map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
-                </optgroup>
-              ))}
-            </select>
-            {locationId !== item.locationId && <small className="field-hint">Saving will move this item there.</small>}
-          </label>
+        {item && targets.length > 1 && (
+          <PlaceSelect label="Stored in" targets={targets} value={place} onChange={setPlace}
+            hint={place !== startPlace ? "Saving will move this item there." : undefined} />
         )}
 
         <PhotoField label="Picture" hint="Take a photo or choose one" savedPath={item?.photoPath}
