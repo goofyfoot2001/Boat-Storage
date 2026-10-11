@@ -136,7 +136,7 @@ a.row-card-main:active { background: #EEF3F8; }
 .dot {
   position: absolute; left: -10px; top: -10px;
   width: 20px; height: 20px; padding: 0; border-radius: 50%;
-  border: 2.5px solid #fff; box-shadow: 0 1px 4px rgb(0 0 0 / 0.35);
+  border: 1px solid #fff; box-shadow: 0 1px 3px rgb(0 0 0 / 0.45);
   cursor: pointer; transition: transform 0.12s;
 }
 /* Bigger invisible target so dots are easy to hit with a finger */

@@ -10,7 +10,7 @@ import * as store from "../data/store";
 import type { Boat, Deck, Location } from "../data/types";
 import { plural } from "../lib/format";
 
-/** The deck layout with its storage-location dots. Tap an empty spot to add a location there. */
+/** The deck layout with its storage-location pins. Tap + or an empty spot to add a pin there. */
 export function DeckPlan() {
   const { deckId } = useParams();
   const userId = useUserId();
@@ -23,6 +23,7 @@ export function DeckPlan() {
   const [locations, setLocations] = useState<Location[]>([]);
   const [editingDeck, setEditingDeck] = useState(false);
   const [pending, setPending] = useState<{ x: number; y: number } | null>(null);
+  const [placing, setPlacing] = useState(false);
   const [hovered, setHovered] = useState<string | null>(null);
   const [selected, setSelected] = useState<string | null>(null);
   const pointerType = useRef("mouse");
@@ -54,6 +55,7 @@ export function DeckPlan() {
       setParams({}, { replace: true });
       await store.moveLocation(moving.id, x, y);
     } else {
+      setPlacing(false);
       setPending({ x, y });
     }
   }
@@ -74,28 +76,39 @@ export function DeckPlan() {
       <AppHeader backTo={`/boats/${deck.boatId}`} title={deck.name}
         subtitle={[boat?.name, plural(locations.length, "location")].filter(Boolean).join(" · ")}
         right={
-          <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
-            <Icon name="edit" size={17} />
-          </button>
+          <>
+            <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
+              <Icon name="edit" size={17} />
+            </button>
+            {photo && !moving && (
+              <button className="icon-btn primary" onClick={() => { setSelected(null); setPlacing(true); }} aria-label="Add pin">
+                <Icon name="plus" size={22} />
+              </button>
+            )}
+          </>
         }
       />
 
       <section className="list">
         {photo ? (
           <>
-            {moving ? (
+            {moving || placing ? (
               <div className="hint banner">
                 <Icon name="map-pin" size={16} />
-                <span className="grow">Tap the new spot for <strong>{moving.name}</strong></span>
-                <button className="btn small" onClick={() => setParams({}, { replace: true })}>Cancel</button>
+                <span className="grow">
+                  {moving ? <>Tap the new spot for <strong>{moving.name}</strong></> : "Tap the layout where the new pin goes"}
+                </span>
+                <button className="btn small" onClick={() => { setPlacing(false); setParams({}, { replace: true }); }}>Cancel</button>
               </div>
             ) : (
               <p className="hint"><Icon name="map-pin" size={14} />
-                {locations.length ? "Tap a dot to see what's there, or tap an empty spot to add a location." : "Tap anywhere on the layout to add your first storage location."}
+                {locations.length
+                  ? "Tap a pin to see what's there. Tap + or an empty spot to add a pin."
+                  : "Tap + or anywhere on the layout to add your first storage pin."}
               </p>
             )}
 
-            <div className={`card plan${moving ? " moving" : ""}`}>
+            <div className={`card plan${moving || placing ? " moving" : ""}`}>
               <div className="plan-canvas" onClick={tapPlan} onPointerDown={e => (pointerType.current = e.pointerType)}>
                 <img src={photo} alt={`${deck.name} layout`} draggable={false} />
                 {locations.map(loc => (
@@ -146,14 +159,14 @@ export function DeckPlan() {
           <div className="empty">
             <Icon name="layers" size={48} />
             <h3>No layout picture</h3>
-            <p>Add the deck diagram from your boat's manufacturer, or a photo of a hand-drawn layout. Then you can mark storage spots on it.</p>
+            <p>Add the deck diagram from your boat's manufacturer, or a photo of a hand-drawn layout. Then you can drop storage pins on it.</p>
             <button className="btn primary" onClick={() => setEditingDeck(true)}><Icon name="camera" size={18} /> Add layout</button>
           </div>
         )}
       </section>
 
       {pending && (
-        <LocationForm title="New storage location" submitLabel="Add location"
+        <LocationForm title="New storage pin" submitLabel="Add pin"
           onSubmit={async (f, p) => {
             const loc = await store.addLocation(userId, deck.id, pending.x, pending.y, f, p ?? null);
             navigate(`/locations/${loc.id}`);

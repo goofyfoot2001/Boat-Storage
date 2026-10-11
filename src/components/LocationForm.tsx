@@ -44,8 +44,8 @@ export function LocationForm({ title, initial, initialPhotoPath, submitLabel, on
         </label>
 
         <div className="field">
-          <span>Dot color</span>
-          <div className="swatches" role="radiogroup" aria-label="Dot color">
+          <span>Pin color</span>
+          <div className="swatches" role="radiogroup" aria-label="Pin color">
             {PIN_COLORS.map(c => (
               <button key={c} type="button" role="radio" aria-checked={c === color} aria-label={c}
                 className={`swatch${c === color ? " on" : ""}`} style={{ background: c }} onClick={() => setColor(c)} />
@@ -60,7 +60,7 @@ export function LocationForm({ title, initial, initialPhotoPath, submitLabel, on
 
         <button className="btn primary block" disabled={busy}>{busy ? "Saving…" : submitLabel}</button>
         {onMove && (
-          <button type="button" className="btn block" onClick={onMove}><Icon name="map-pin" size={16} /> Move dot on layout</button>
+          <button type="button" className="btn block" onClick={onMove}><Icon name="map-pin" size={16} /> Move pin on layout</button>
         )}
         {onDelete && (
           <button type="button" className="btn danger-text block" onClick={onDelete}><Icon name="trash" size={16} /> Delete location</button>
