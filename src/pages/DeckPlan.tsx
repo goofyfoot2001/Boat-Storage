@@ -9,6 +9,7 @@ import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat, Deck, Location } from "../data/types";
 import { plural } from "../lib/format";
+import { usePanZoom } from "../lib/usePanZoom";
 
 /** The deck layout with its storage-location pins. Tap + or an empty spot to add a pin there. */
 export function DeckPlan() {
@@ -28,6 +29,7 @@ export function DeckPlan() {
   const [selected, setSelected] = useState<string | null>(null);
   const pointerType = useRef("mouse");
   const photo = usePhotoUrl(deck?.photoPath);
+  const zoom = usePanZoom();
 
   const load = useCallback(async () => {
     const d = await store.getDeck(deckId!);
@@ -46,6 +48,7 @@ export function DeckPlan() {
   const moving = locations.find(l => l.id === movingId);
 
   async function tapPlan(e: MouseEvent<HTMLDivElement>) {
+    if (zoom.wasGesture()) return; // that was a pinch or drag, not a tap
     if (selected) return setSelected(null); // first tap away just closes the name bubble
     const box = e.currentTarget.getBoundingClientRect();
     const x = clamp((e.clientX - box.left) / box.width);
@@ -62,7 +65,7 @@ export function DeckPlan() {
 
   function tapDot(e: MouseEvent, loc: Location) {
     e.stopPropagation();
-    if (moving) return;
+    if (moving || zoom.wasGesture()) return;
     // Mouse: hovering already shows the name, so a click opens it.
     // Finger: the first tap shows the name, a second tap opens it.
     if (pointerType.current === "mouse" || selected === loc.id) navigate(`/locations/${loc.id}`);
@@ -76,22 +79,20 @@ export function DeckPlan() {
       <AppHeader backTo={`/boats/${deck.boatId}`} title={deck.name}
         subtitle={[boat?.name, plural(locations.length, "location")].filter(Boolean).join(" · ")}
         right={
-          <>
-            <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
-              <Icon name="edit" size={17} />
-            </button>
-            {photo && !moving && (
-              <button className="icon-btn primary" onClick={() => { setSelected(null); setPlacing(true); }} aria-label="Add pin">
-                <Icon name="plus" size={22} />
-              </button>
-            )}
-          </>
+          <button className="icon-btn" onClick={() => setEditingDeck(true)} aria-label="Edit deck">
+            <Icon name="edit" size={17} />
+          </button>
         }
       />
 
       <section className="list">
         {photo ? (
           <>
+            {!moving && !placing && (
+              <button className="btn primary block" onClick={() => { setSelected(null); setPlacing(true); }}>
+                <Icon name="plus" size={18} /> Add location
+              </button>
+            )}
             {moving || placing ? (
               <div className="hint banner">
                 <Icon name="map-pin" size={16} />
@@ -103,13 +104,17 @@ export function DeckPlan() {
             ) : (
               <p className="hint"><Icon name="map-pin" size={14} />
                 {locations.length
-                  ? "Tap a pin to see what's there. Tap + or an empty spot to add a pin."
-                  : "Tap + or anywhere on the layout to add your first storage pin."}
+                  ? "Tap a pin to see what's there. Pinch or use + / − to zoom."
+                  : "Tap Add location, then tap the spot on the layout."}
               </p>
             )}
 
             <div className={`card plan${moving || placing ? " moving" : ""}`}>
-              <div className="plan-canvas" onClick={tapPlan} onPointerDown={e => (pointerType.current = e.pointerType)}>
+              <div className={`plan-frame${zoom.view.scale > 1 ? " zoomed" : ""}`} ref={zoom.frameRef}
+                {...zoom.handlers}
+                onPointerDown={e => { pointerType.current = e.pointerType; zoom.handlers.onPointerDown(e); }}>
+              <div className="plan-canvas" onClick={tapPlan}
+                style={{ transform: `translate(${zoom.view.x}px, ${zoom.view.y}px) scale(${zoom.view.scale})` }}>
                 <img src={photo} alt={`${deck.name} layout`} draggable={false} />
                 {locations.map(loc => (
                   <div key={loc.id} className={[
@@ -119,7 +124,7 @@ export function DeckPlan() {
                     loc.x > 0.75 && "label-end",
                     loc.id === movingId && "is-moving",
                   ].filter(Boolean).join(" ")}
-                    style={{ left: `${loc.x * 100}%`, top: `${loc.y * 100}%` }}>
+                    style={{ left: `${loc.x * 100}%`, top: `${loc.y * 100}%`, transform: `scale(${1 / zoom.view.scale})` }}>
                     <button className="dot" style={{ background: loc.color }} aria-label={`${loc.name}, ${plural(loc.itemCount, "item")}`}
                       onPointerDown={(e: PointerEvent) => (pointerType.current = e.pointerType)}
                       onPointerEnter={(e: PointerEvent) => e.pointerType === "mouse" && setHovered(loc.id)}
@@ -135,7 +140,17 @@ export function DeckPlan() {
                     )}
                   </div>
                 ))}
-                {pending && <div className="dot-wrap" style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%` }}><span className="dot pending" /></div>}
+                {pending && (
+                  <div className="dot-wrap" style={{ left: `${pending.x * 100}%`, top: `${pending.y * 100}%`, transform: `scale(${1 / zoom.view.scale})` }}>
+                    <span className="dot pending" />
+                  </div>
+                )}
+              </div>
+              </div>
+              <div className="zoom-controls">
+                <button onClick={() => zoom.zoomBy(1.6)} aria-label="Zoom in">+</button>
+                <button onClick={() => zoom.zoomBy(1 / 1.6)} disabled={zoom.view.scale <= 1} aria-label="Zoom out">−</button>
+                {zoom.view.scale > 1 && <button onClick={zoom.reset} aria-label="Reset zoom" className="zoom-reset">1×</button>}
               </div>
             </div>
 
