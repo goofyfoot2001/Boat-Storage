@@ -9,10 +9,12 @@ import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat } from "../data/types";
 import { move } from "../lib/move";
+import { useOnline, useReloadOnReconnect } from "../lib/useOnline";
 
 export function Boats() {
   const userId = useUserId();
   const { session, signOut } = useAuth();
+  const online = useOnline(); // adding and editing need a connection
   const [boats, setBoats] = useState<Boat[] | null>(null);
   const [deckCounts, setDeckCounts] = useState<Record<string, number>>({});
   const [adding, setAdding] = useState(false);
@@ -34,6 +36,7 @@ export function Boats() {
   }, [userId, session?.email]);
 
   useEffect(() => { load(); }, [load]);
+  useReloadOnReconnect(load);
 
   // Your own boats first (you can reorder those); boats others shared with you after.
   const owned = boats?.filter(b => roles[b.id] === "owner") ?? [];
@@ -62,14 +65,14 @@ export function Boats() {
           <button className="btn primary small" onClick={() => setReordering(false)}>Done</button>
         ) : (
           <>
-            {owned.length > 1 && (
+            {online && owned.length > 1 && (
               <button className="icon-btn" onClick={() => setReordering(true)} aria-label="Reorder boats">
                 <Icon name="chevron-down" size={18} />
               </button>
             )}
-            <button className="icon-btn primary" onClick={() => setAdding(true)} aria-label="Add boat">
+            {online && <button className="icon-btn primary" onClick={() => setAdding(true)} aria-label="Add boat">
               <Icon name="plus" size={22} />
-            </button>
+            </button>}
           </>
         )}
       />
@@ -101,16 +104,16 @@ export function Boats() {
         {boats && owned.length === 0 && (
           <div className="empty">
             <Icon name="anchor" size={48} />
-            <h3>No boats of your own yet</h3>
-            <p>Add your first boat to start mapping where everything is stored.</p>
-            <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={18} /> Add a boat</button>
+            <h3>{online ? "No boats of your own yet" : "No boats saved on this phone"}</h3>
+            <p>{online ? "Add your first boat to start mapping where everything is stored." : "When you have signal, open a boat and use Offline → Save to this phone."}</p>
+            {online && <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={18} /> Add a boat</button>}
           </div>
         )}
 
         {owned.map((boat, i) => (
           <BoatCard key={boat.id} boat={boat} deckCount={deckCounts[boat.id] ?? 0}
             reordering={reordering} isFirst={i === 0} isLast={i === owned.length - 1}
-            onEdit={() => setEditing(boat)} onMove={by => reorder(i, by)} />
+            onEdit={online ? () => setEditing(boat) : undefined} onMove={by => reorder(i, by)} />
         ))}
 
         {shared.length > 0 && !reordering && (

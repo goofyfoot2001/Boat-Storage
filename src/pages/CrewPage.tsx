@@ -7,6 +7,7 @@ import { Sheet } from "../components/Sheet";
 import * as store from "../data/store";
 import type { Boat } from "../data/types";
 import { useBoatRole } from "../lib/useBoatRole";
+import { useOnline } from "../lib/useOnline";
 
 const ROLE_LABEL: Record<store.BoatRole, string> = { owner: "Owner", crew: "Crew", viewer: "View only" };
 const ROLE_HELP = {
@@ -21,6 +22,7 @@ export function CrewPage() {
   const navigate = useNavigate();
   const role = useBoatRole(boatId);
   const isOwner = role === "owner";
+  const online = useOnline();
   const [boat, setBoat] = useState<Boat | null | undefined>(undefined);
   const [crew, setCrew] = useState<store.CrewMember[]>([]);
   const [invites, setInvites] = useState<store.Invite[]>([]);
@@ -116,7 +118,7 @@ export function CrewPage() {
           </>
         )}
 
-        {role && role !== "owner" && (
+        {online && role && role !== "owner" && (
           <button className="btn danger-text block" onClick={() => setConfirm({
             title: "Leave this boat?",
             body: `You'll no longer see ${boat.name}. The owner can invite you again.`,

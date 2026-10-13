@@ -294,6 +294,22 @@ button.doc-open:active { background: #EEF3F8; }
 .role-badge { display: inline-block; margin-left: 8px; padding: 1px 8px; border-radius: 10px; font-size: 12px; font-weight: 600; background: var(--tint-soft); color: var(--tint); }
 .added-by { color: var(--muted); font-size: 13px; }
 
+/* ── Offline ────────────────────────────────────────────────────────── */
+.offline-banner {
+  display: flex; align-items: flex-start; gap: 8px;
+  padding: calc(8px + env(safe-area-inset-top)) 16px 8px; font-size: 13px; line-height: 1.35;
+  background: #3F4B5B; color: #fff;
+}
+.offline-banner svg { flex: none; margin-top: 1px; }
+.offline-link { width: 100%; border: 0; text-align: left; font: inherit; color: inherit; }
+.deck-thumb.saved { background: #E3F4EC; color: #2B9E6E; }
+.progress { display: flex; flex-direction: column; gap: 6px; }
+.progress-bar { height: 8px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.progress-bar span { display: block; height: 100%; background: var(--tint); transition: width 0.2s; }
+.progress small { color: var(--text-2); font-size: 13px; }
+.doc-saved { color: #2B9E6E; flex: none; }
+.doc-open:disabled { opacity: 0.5; }
+
 /* ── Containers (bins, totes, boxes) ────────────────────────────────── */
 .box-card { border-left: 5px solid; overflow: visible; }
 .box-head { display: flex; align-items: stretch; }

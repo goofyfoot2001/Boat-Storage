@@ -1,18 +1,23 @@
 import { useEffect, useState } from "react";
 import { useUserId } from "../auth";
 import * as store from "../data/store";
+import { useOnline } from "./useOnline";
 
-/** Your role on a boat: "owner", "crew", "viewer" — or undefined while loading. */
+/**
+ * Your role on a boat: "owner", "crew", "viewer" — or undefined while loading.
+ * With no connection everyone is treated as a viewer, since changes can't be saved offline.
+ */
 export function useBoatRole(boatId: string | undefined) {
   const userId = useUserId();
+  const online = useOnline();
   const [role, setRole] = useState<store.BoatRole | null | undefined>(undefined);
   useEffect(() => {
     if (!boatId) return;
     let cancelled = false;
-    store.myRole(userId, boatId).then(r => !cancelled && setRole(r));
+    store.myRole(userId, boatId).then(r => !cancelled && setRole(r), () => {});
     return () => { cancelled = true; };
   }, [userId, boatId]);
-  return role;
+  return online || !role ? role : "viewer";
 }
 
 /** A short display name: "pat.smith@gmail.com" → "pat.smith". */

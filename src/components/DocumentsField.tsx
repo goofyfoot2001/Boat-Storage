@@ -27,8 +27,15 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
   const [confirming, setConfirming] = useState<string | null>(null);
   const [error, setError] = useState("");
 
+  // Which documents are saved on this phone (so they open with no signal).
+  const [onPhone, setOnPhone] = useState<Set<string>>(new Set());
+
   const load = useCallback(async () => {
-    if (itemId) setDocs(await store.listDocuments(itemId));
+    if (!itemId) return;
+    const list = await store.listDocuments(itemId);
+    setDocs(list);
+    const saved = await Promise.all(list.map(async d => [d.id, await store.isDocumentSaved(d)] as const));
+    setOnPhone(new Set(saved.filter(([, yes]) => yes).map(([id]) => id)));
   }, [itemId]);
   useEffect(() => { load(); }, [load]);
 
@@ -60,10 +67,16 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
     try {
       const url = await store.documentUrl(doc);
       if (tab) tab.location.href = url;
-      else window.location.href = url;
+      else if (url.startsWith("blob:")) {
+        // Saved on this phone: hand the file over with its real name.
+        const a = Object.assign(document.createElement("a"), { href: url, download: doc.name });
+        document.body.append(a);
+        a.click();
+        a.remove();
+      } else window.location.href = url;
     } catch {
       tab?.close();
-      setError(`Couldn't open “${doc.name}”.`);
+      setError(navigator.onLine ? `Couldn't open “${doc.name}”.` : `“${doc.name}” isn't saved on this phone, so it needs a connection.`);
     }
   }
 
@@ -86,6 +99,7 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
                 <span className="doc-badge">{fileExt(doc.name)}</span>
                 <span className="doc-name">{doc.name}</span>
                 <span className="muted">{formatBytes(doc.size)}</span>
+                {onPhone.has(doc.id) && <span className="doc-saved" title="Saved on this phone"><Icon name="check" size={14} /></span>}
               </button>
               {readOnly ? null : confirming === doc.id ? (
                 <span className="doc-confirm">

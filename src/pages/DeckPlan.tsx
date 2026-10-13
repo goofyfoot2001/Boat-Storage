@@ -7,6 +7,7 @@ import { LocationForm } from "../components/LocationForm";
 import { NamePhotoForm } from "../components/NamePhotoForm";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
+import { useReloadOnReconnect } from "../lib/useOnline";
 import type { Boat, Deck, Location } from "../data/types";
 import { plural } from "../lib/format";
 import { useBoatRole } from "../lib/useBoatRole";
@@ -36,6 +37,7 @@ export function DeckPlan() {
   }, [deckId]);
 
   useEffect(() => { load(); }, [load]);
+  useReloadOnReconnect(load);
 
   if (deck === null) return <Navigate to="/" replace />;
   if (!deck) return null;

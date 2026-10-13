@@ -6,7 +6,9 @@ import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
 import { NamePhotoForm } from "../components/NamePhotoForm";
+import { OfflineCard } from "../components/OfflineCard";
 import * as store from "../data/store";
+import { useReloadOnReconnect } from "../lib/useOnline";
 import type { Boat, Deck } from "../data/types";
 import { plural } from "../lib/format";
 import { move } from "../lib/move";
@@ -45,6 +47,7 @@ export function BoatDecks() {
   }, [userId, boatId]);
 
   useEffect(() => { load(); }, [load]);
+  useReloadOnReconnect(load);
 
   if (boat === null) return <Navigate to="/" replace />;
   if (!boat) return null;
@@ -95,6 +98,8 @@ export function BoatDecks() {
             <Icon name="chevron-right" size={18} color="var(--muted)" />
           </Link>
         )}
+
+        {!reordering && <OfflineCard boatId={boat.id} boatName={boat.name} />}
 
         <h2 className="section-title">Decks</h2>
         {reordering && <p className="hint">Use the arrows to change the order, then tap Done.</p>}

@@ -1,7 +1,9 @@
-import { StrictMode } from "react";
+import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
+import { OfflineBanner } from "./components/OfflineBanner";
+import { refreshOfflineBoats } from "./data/store";
 import { BoatDecks } from "./pages/BoatDecks";
 import { Boats } from "./pages/Boats";
 import { CrewPage } from "./pages/CrewPage";
@@ -34,6 +36,9 @@ function App() {
   if (resume) return <Navigate to={`/invite/${resume}`} replace />;
 
   return (
+    <>
+    <OfflineBanner />
+    <KeepOfflineCopiesFresh userId={session.userId} />
     <Routes>
       <Route path="/" element={<Boats />} />
       <Route path="/boats/:boatId" element={<BoatDecks />} />
@@ -43,7 +48,29 @@ function App() {
       <Route path="/locations/:locationId" element={<LocationPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
+    </>
   );
+}
+
+/** Refresh the boats kept on this device when the app opens, comes back to the front, or reconnects. */
+function KeepOfflineCopiesFresh({ userId }: { userId: string }) {
+  useEffect(() => {
+    const refresh = () => refreshOfflineBoats(userId);
+    const refreshIfShown = () => { if (document.visibilityState === "visible") refresh(); };
+    refresh();
+    window.addEventListener("online", refresh);
+    document.addEventListener("visibilitychange", refreshIfShown);
+    return () => {
+      window.removeEventListener("online", refresh);
+      document.removeEventListener("visibilitychange", refreshIfShown);
+    };
+  }, [userId]);
+  return null;
+}
+
+// Lets the app itself open with no signal (it's kept on the device after the first visit).
+if (import.meta.env.PROD && "serviceWorker" in navigator) {
+  navigator.serviceWorker.register(`${import.meta.env.BASE_URL}sw.js`, { scope: import.meta.env.BASE_URL }).catch(() => {});
 }
 
 createRoot(document.getElementById("root")!).render(

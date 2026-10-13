@@ -16,8 +16,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<store.Session | null | undefined>(undefined);
 
   useEffect(() => {
+    // Offshore the sign-in can't be renewed, so carry on as the person last signed in on this
+    // device rather than locking them out of their saved boats.
+    if (!navigator.onLine) {
+      const saved = savedSignIn();
+      if (saved) setSession(saved);
+    }
     const { data } = supabase.auth.onAuthStateChange((_event, s) => {
-      setSession(s ? { userId: s.user.id, email: s.user.email ?? "" } : null);
+      if (s) setSession({ userId: s.user.id, email: s.user.email ?? "" });
+      else setSession(!navigator.onLine ? savedSignIn() : null);
     });
     return () => data.subscription.unsubscribe();
   }, []);
@@ -28,9 +35,32 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     session,
     signIn: store.signIn,
     signUp: store.signUp,
-    signOut: () => { store.signOut(); },
+    signOut: () => {
+      store.signOut();
+      forgetSavedSignIn();
+      setSession(null);
+    },
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+}
+
+/** Supabase keeps the sign-in in a "sb-<project>-auth-token" entry on the device. */
+function signInKey() {
+  try { return Object.keys(localStorage).find(k => k.startsWith("sb-") && k.endsWith("-auth-token")); } catch { return undefined; }
+}
+
+function savedSignIn(): store.Session | null {
+  try {
+    const key = signInKey();
+    const user = key && JSON.parse(localStorage.getItem(key) ?? "null")?.user;
+    return user?.id ? { userId: user.id, email: user.email ?? "" } : null;
+  } catch {
+    return null;
+  }
+}
+
+function forgetSavedSignIn() {
+  try { const key = signInKey(); if (key) localStorage.removeItem(key); } catch { /* ignore */ }
 }
 
 export function useAuth() {

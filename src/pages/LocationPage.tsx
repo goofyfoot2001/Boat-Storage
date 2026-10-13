@@ -12,6 +12,7 @@ import { Sheet } from "../components/Sheet";
 import { StoredItemForm } from "../components/StoredItemForm";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
+import { useReloadOnReconnect } from "../lib/useOnline";
 import type { Container, Deck, Item, Location } from "../data/types";
 import { formatPrice, plural } from "../lib/format";
 import { buildTargets, containerPath, type Target } from "../lib/places";
@@ -69,6 +70,7 @@ export function LocationPage() {
   }, [locationId]);
 
   useEffect(() => { load(); }, [load]);
+  useReloadOnReconnect(load);
 
   // Everything on this boat, for the "Stored in" choice when editing an item or container.
   useEffect(() => {

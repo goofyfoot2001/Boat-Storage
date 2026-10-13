@@ -1,13 +1,34 @@
 // Everything the screens need to read and change data goes through here.
 // Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
+// With no signal, reads fall back to the copy of a boat saved on this device (see "Offline" below).
+import * as local from "./offlineDb";
 import { supabase } from "./supabase";
 import type { Boat, Container, Deck, Item, ItemDocument, Location } from "./types";
 
 const PHOTOS = "photos";
 
+/** The network couldn't be reached. */
+export class OfflineError extends Error {}
+
+const NETWORK_ERROR = /failed to fetch|networkerror|load failed|network request failed|fetch failed/i;
+
 function check<T>(res: { data: T; error: { message: string } | null }): T {
-  if (res.error) throw new Error(res.error.message);
+  if (res.error) {
+    if (!navigator.onLine || NETWORK_ERROR.test(res.error.message)) throw new OfflineError("You're offline.");
+    throw new Error(res.error.message);
+  }
   return res.data;
+}
+
+/** Read from Supabase; if there's no connection, read the saved copy on this device instead. */
+async function readOr<T>(online: () => Promise<T>, offline: () => Promise<T>): Promise<T> {
+  if (!navigator.onLine) return offline();
+  try {
+    return await online();
+  } catch (err) {
+    if (err instanceof OfflineError || (err instanceof TypeError && NETWORK_ERROR.test(err.message))) return offline();
+    throw err;
+  }
 }
 
 // ── Auth ────────────────────────────────────────────────────────────────────
@@ -44,10 +65,16 @@ export async function signOut() {
 
 const urlCache = new Map<string, { url: string; expires: number }>();
 
-/** Photos are private, so each one is shown through a short-lived signed link. */
+/**
+ * Photos are private, so each one is shown through a short-lived signed link — or, if it's
+ * saved on this device for offline use, straight from there (faster, and works without signal).
+ */
 export async function photoUrl(path: string) {
   const hit = urlCache.get(path);
   if (hit && hit.expires > Date.now()) return hit.url;
+  const saved = await savedFileUrl(PHOTOS, path);
+  if (saved) return saved;
+  if (!navigator.onLine) throw new OfflineError("Photo not saved on this device.");
   const signedUrl = check(await supabase.storage.from(PHOTOS).createSignedUrl(path, 3600))!.signedUrl;
   urlCache.set(path, { url: signedUrl, expires: Date.now() + 50 * 60_000 });
   return signedUrl;
@@ -94,21 +121,30 @@ interface BoatRow { id: string; user_id: string; name: string; photo_path: strin
 const toBoat = (r: BoatRow): Boat => ({ id: r.id, userId: r.user_id, name: r.name, photoPath: r.photo_path, sortOrder: r.sort_order });
 
 export async function listBoats() {
-  const rows = check(await supabase.from("boats").select("*").order("sort_order").order("created_at"));
-  return (rows as BoatRow[]).map(toBoat);
+  return readOr(async () => {
+    const rows = check(await supabase.from("boats").select("*").order("sort_order").order("created_at"));
+    return (rows as BoatRow[]).map(toBoat);
+  }, async () => (await snapshots()).map(s => s.boat).sort((a, b) => a.sort_order - b.sort_order).map(toBoat));
 }
 
 /** Number of decks on each boat, keyed by boat id. */
 export async function deckCounts() {
-  const rows = check(await supabase.from("decks").select("boat_id")) as { boat_id: string }[];
-  const counts: Record<string, number> = {};
-  for (const r of rows) counts[r.boat_id] = (counts[r.boat_id] ?? 0) + 1;
-  return counts;
+  return readOr(async () => {
+    const rows = check(await supabase.from("decks").select("boat_id")) as { boat_id: string }[];
+    const counts: Record<string, number> = {};
+    for (const r of rows) counts[r.boat_id] = (counts[r.boat_id] ?? 0) + 1;
+    return counts;
+  }, async () => Object.fromEntries((await snapshots()).map(s => [s.boatId, s.decks.length])));
 }
 
 export async function getBoat(id: string) {
-  const row = check(await supabase.from("boats").select("*").eq("id", id).maybeSingle());
-  return row ? toBoat(row as BoatRow) : undefined;
+  return readOr(async () => {
+    const row = check(await supabase.from("boats").select("*").eq("id", id).maybeSingle());
+    return row ? toBoat(row as BoatRow) : undefined;
+  }, async () => {
+    const s = await snapshot(id);
+    return s && toBoat(s.boat);
+  });
 }
 
 export async function addBoat(name: string, photo: Blob | null, sortOrder: number) {
@@ -150,13 +186,25 @@ const toDeck = (r: DeckRow): Deck => ({
 });
 
 export async function listDecks(boatId: string) {
-  const rows = check(await supabase.from("decks").select("*, locations(count)").eq("boat_id", boatId).order("sort_order").order("created_at"));
-  return (rows as DeckRow[]).map(toDeck);
+  return readOr(async () => {
+    const rows = check(await supabase.from("decks").select("*, locations(count)").eq("boat_id", boatId).order("sort_order").order("created_at"));
+    return (rows as DeckRow[]).map(toDeck);
+  }, async () => {
+    const s = await snapshot(boatId);
+    if (!s) return [];
+    return [...s.decks].sort((a, b) => a.sort_order - b.sort_order)
+      .map(d => toDeck({ ...d, locations: [{ count: s.locations.filter(l => l.deck_id === d.id).length }] }));
+  });
 }
 
 export async function getDeck(id: string) {
-  const row = check(await supabase.from("decks").select("*").eq("id", id).maybeSingle());
-  return row ? toDeck(row as DeckRow) : undefined;
+  return readOr(async () => {
+    const row = check(await supabase.from("decks").select("*").eq("id", id).maybeSingle());
+    return row ? toDeck(row as DeckRow) : undefined;
+  }, async () => {
+    const d = (await snapshots()).flatMap(s => s.decks).find(x => x.id === id);
+    return d && toDeck(d);
+  });
 }
 
 export async function addDeck(boatId: string, name: string, photo: Blob | null, sortOrder: number) {
@@ -209,13 +257,25 @@ const toLocation = (r: LocationRow): Location => ({
 });
 
 export async function listLocations(deckId: string) {
-  const rows = check(await supabase.from("locations").select("*, items(count)").eq("deck_id", deckId).order("name"));
-  return (rows as LocationRow[]).map(toLocation);
+  return readOr(async () => {
+    const rows = check(await supabase.from("locations").select("*, items(count)").eq("deck_id", deckId).order("name"));
+    return (rows as LocationRow[]).map(toLocation);
+  }, async () => {
+    const s = (await snapshots()).find(x => x.decks.some(d => d.id === deckId));
+    if (!s) return [];
+    return s.locations.filter(l => l.deck_id === deckId).sort(byName)
+      .map(l => toLocation({ ...l, items: [{ count: s.items.filter(i => i.location_id === l.id).length }] }));
+  });
 }
 
 export async function getLocation(id: string) {
-  const row = check(await supabase.from("locations").select("*").eq("id", id).maybeSingle());
-  return row ? toLocation(row as LocationRow) : undefined;
+  return readOr(async () => {
+    const row = check(await supabase.from("locations").select("*").eq("id", id).maybeSingle());
+    return row ? toLocation(row as LocationRow) : undefined;
+  }, async () => {
+    const l = (await snapshots()).flatMap(s => s.locations).find(x => x.id === id);
+    return l && toLocation(l);
+  });
 }
 
 export interface LocationFields { name: string; color: string }
@@ -256,8 +316,10 @@ const toContainer = (r: ContainerRow): Container => ({
 });
 
 export async function listContainers(locationId: string) {
-  const rows = check(await supabase.from("containers").select("*").eq("location_id", locationId).order("name"));
-  return (rows as ContainerRow[]).map(toContainer);
+  return readOr(async () => {
+    const rows = check(await supabase.from("containers").select("*").eq("location_id", locationId).order("name"));
+    return (rows as ContainerRow[]).map(toContainer);
+  }, async () => (await snapshots()).flatMap(s => s.containers).filter(c => c.location_id === locationId).sort(byName).map(toContainer));
 }
 
 export interface ContainerFields { name: string; notes: string; color: string }
@@ -334,8 +396,10 @@ const toItem = (r: ItemRow): Item => ({
 const ITEM_SELECT = "*, item_documents(id, name)";
 
 export async function listItems(locationId: string) {
-  const rows = check(await supabase.from("items").select(ITEM_SELECT).eq("location_id", locationId).order("name"));
-  return (rows as ItemRow[]).map(toItem);
+  return readOr(async () => {
+    const rows = check(await supabase.from("items").select(ITEM_SELECT).eq("location_id", locationId).order("name"));
+    return (rows as ItemRow[]).map(toItem);
+  }, async () => (await snapshots()).flatMap(s => s.items).filter(i => i.location_id === locationId).sort(byName).map(toItem));
 }
 
 export interface ItemFields {
@@ -359,6 +423,22 @@ export interface BoatContents {
 }
 
 export async function boatContents(boatId: string): Promise<BoatContents> {
+  return readOr(() => boatContentsOnline(boatId), async () => {
+    const s = await snapshot(boatId);
+    if (!s) return { decks: [], locations: [], containers: [], items: [] };
+    const decks = [...s.decks].sort((a, b) => a.sort_order - b.sort_order);
+    const deckName = new Map(decks.map(d => [d.id, d.name]));
+    return {
+      decks: decks.map(d => ({ id: d.id, name: d.name })),
+      locations: s.locations.map(l => ({ id: l.id, name: l.name, color: l.color, deckId: l.deck_id, deckName: deckName.get(l.deck_id) ?? "" }))
+        .sort((a, b) => a.deckName.localeCompare(b.deckName) || a.name.localeCompare(b.name)),
+      containers: [...s.containers].sort(byName).map(toContainer),
+      items: s.items.map(toItem),
+    };
+  });
+}
+
+async function boatContentsOnline(boatId: string): Promise<BoatContents> {
   const rows = check(await supabase.from("decks")
     .select(`id, name, sort_order, locations(id, name, color, items(${ITEM_SELECT}), containers(*))`)
     .eq("boat_id", boatId).order("sort_order")) as {
@@ -406,8 +486,10 @@ const toDocument = (r: DocumentRow): ItemDocument => ({
 });
 
 export async function listDocuments(itemId: string) {
-  const rows = check(await supabase.from("item_documents").select("*").eq("item_id", itemId).order("name"));
-  return (rows as DocumentRow[]).map(toDocument);
+  return readOr(async () => {
+    const rows = check(await supabase.from("item_documents").select("*").eq("item_id", itemId).order("name"));
+    return (rows as DocumentRow[]).map(toDocument);
+  }, async () => (await snapshots()).flatMap(s => s.documents).filter(d => d.item_id === itemId).sort(byName).map(toDocument));
 }
 
 export async function attachDocument(boatId: string, itemId: string, file: File) {
@@ -433,8 +515,16 @@ export async function deleteDocument(doc: ItemDocument) {
 /** Types a browser can show by itself; everything else is downloaded / handed to the phone's viewer. */
 const VIEWABLE = /^(application\/pdf|image\/|text\/plain)/;
 
-/** A short-lived private link to open or download the document. */
+/** Whether this document is saved on this device (so it opens without signal). */
+export async function isDocumentSaved(doc: ItemDocument) {
+  return !!(await local.get(FILES, local.fileKey(DOCUMENTS, doc.path)));
+}
+
+/** A link to open or download the document: from this device if saved there, otherwise a short-lived private link. */
 export async function documentUrl(doc: ItemDocument) {
+  const saved = await savedFileUrl(DOCUMENTS, doc.path);
+  if (saved) return saved;
+  if (!navigator.onLine) throw new OfflineError("This document isn't saved on this device.");
   const viewInBrowser = !!doc.mimeType && VIEWABLE.test(doc.mimeType);
   const res = await supabase.storage.from(DOCUMENTS)
     .createSignedUrl(doc.path, 600, viewInBrowser ? undefined : { download: doc.name });
@@ -459,19 +549,25 @@ const toInvite = (r: InviteRow): Invite => ({
 
 /** The signed-in person's role on every boat they can see. */
 export async function myRoles(userId: string): Promise<Record<string, BoatRole>> {
-  const rows = check(await supabase.from("boat_members").select("boat_id, role").eq("user_id", userId)) as { boat_id: string; role: BoatRole }[];
-  return Object.fromEntries(rows.map(r => [r.boat_id, r.role]));
+  return readOr(async () => {
+    const rows = check(await supabase.from("boat_members").select("boat_id, role").eq("user_id", userId)) as { boat_id: string; role: BoatRole }[];
+    return Object.fromEntries(rows.map(r => [r.boat_id, r.role]));
+  }, async () => Object.fromEntries((await snapshots()).map(s => [s.boatId, s.role])));
 }
 
 export async function myRole(userId: string, boatId: string): Promise<BoatRole | null> {
-  const row = check(await supabase.from("boat_members").select("role").eq("boat_id", boatId).eq("user_id", userId).maybeSingle());
-  return (row as { role: BoatRole } | null)?.role ?? null;
+  return readOr(async () => {
+    const row = check(await supabase.from("boat_members").select("role").eq("boat_id", boatId).eq("user_id", userId).maybeSingle());
+    return (row as { role: BoatRole } | null)?.role ?? null;
+  }, async () => (await snapshot(boatId))?.role ?? null);
 }
 
 /** Everyone on a boat, owner first. */
 export async function boatCrew(boatId: string): Promise<CrewMember[]> {
-  const rows = check(await supabase.rpc("boat_crew", { b: boatId })) as { user_id: string; email: string; role: BoatRole; joined_at: string }[];
-  return rows.map(r => ({ userId: r.user_id, email: r.email, role: r.role, joinedAt: r.joined_at }));
+  return readOr(async () => {
+    const rows = check(await supabase.rpc("boat_crew", { b: boatId })) as { user_id: string; email: string; role: BoatRole; joined_at: string }[];
+    return rows.map(r => ({ userId: r.user_id, email: r.email, role: r.role, joinedAt: r.joined_at }));
+  }, async () => (await snapshot(boatId))?.crew ?? []);
 }
 
 export async function setCrewRole(boatId: string, userId: string, role: "crew" | "viewer") {
@@ -485,8 +581,10 @@ export async function removeCrew(boatId: string, userId: string) {
 
 /** Invites the owner has sent that haven't been accepted yet. */
 export async function pendingInvites(boatId: string) {
-  const rows = check(await supabase.from("boat_invites").select("*").eq("boat_id", boatId).is("accepted_at", null).order("created_at"));
-  return (rows as InviteRow[]).map(toInvite);
+  return readOr(async () => {
+    const rows = check(await supabase.from("boat_invites").select("*").eq("boat_id", boatId).is("accepted_at", null).order("created_at"));
+    return (rows as InviteRow[]).map(toInvite);
+  }, async () => [] as Invite[]);
 }
 
 export async function createInvite(boatId: string, email: string, role: "crew" | "viewer") {
@@ -526,11 +624,194 @@ export async function acceptInvite(token: string): Promise<string> {
 
 /** Invites waiting for the signed-in person (matched by their email), with the boat name. */
 export async function myInvites(email: string) {
-  const rows = check(await supabase.from("boat_invites").select("*").eq("email", email.toLowerCase()).is("accepted_at", null)) as InviteRow[];
-  const live = rows.map(toInvite).filter(i => new Date(i.expiresAt) > new Date());
-  return Promise.all(live.map(async i => ({ invite: i, info: await inviteInfo(i.token) })));
+  return readOr(async () => {
+    const rows = check(await supabase.from("boat_invites").select("*").eq("email", email.toLowerCase()).is("accepted_at", null)) as InviteRow[];
+    const live = rows.map(toInvite).filter(i => new Date(i.expiresAt) > new Date());
+    return Promise.all(live.map(async i => ({ invite: i, info: await inviteInfo(i.token) })));
+  }, async () => []);
 }
 
 export async function declineInvite(id: string) {
   check(await supabase.from("boat_invites").delete().eq("id", id));
+}
+
+// ── Offline: a copy of chosen boats kept on this device ─────────────────────
+// Turned on per boat ("Keep on this phone"). Whenever there's a connection the copy is refreshed;
+// with no connection, the reads above fall back to it. Changes still need a connection.
+
+const FILES = "files";
+const SETTINGS_KEY = "bsm-offline-boats";
+
+/** What to keep on the device for a boat. Deck layout pictures are always kept (the pins need them). */
+export interface OfflineOptions { photos: boolean; docs: boolean }
+
+interface Snapshot {
+  boatId: string;
+  savedAt: number;
+  boat: BoatRow;
+  decks: DeckRow[];
+  locations: LocationRow[];
+  containers: ContainerRow[];
+  items: ItemRow[];
+  documents: DocumentRow[];
+  role: BoatRole;
+  crew: CrewMember[];
+  /** Storage keys of the files kept for this boat. */
+  fileKeys: string[];
+}
+
+const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
+
+let snapCache: Snapshot[] | null = null;
+async function snapshots() {
+  snapCache ??= await local.getAll<Snapshot>("snapshots").catch(() => []);
+  return snapCache;
+}
+async function snapshot(boatId: string) {
+  return (await snapshots()).find(s => s.boatId === boatId);
+}
+
+const fileUrls = new Map<string, string>();
+/** A local link to a file saved on this device, or undefined if it isn't saved. */
+async function savedFileUrl(bucket: string, path: string) {
+  const key = local.fileKey(bucket, path);
+  const hit = fileUrls.get(key);
+  if (hit) return hit;
+  const saved = await local.get<local.SavedFile>(FILES, key).catch(() => undefined);
+  if (!saved) return undefined;
+  const url = URL.createObjectURL(saved.blob);
+  fileUrls.set(key, url);
+  return url;
+}
+
+/** Which boats are kept on this device, and what for each (remembered on this device only). */
+export function offlineSettings(): Record<string, OfflineOptions> {
+  try { return JSON.parse(localStorage.getItem(SETTINGS_KEY) ?? "{}"); } catch { return {}; }
+}
+function setOfflineSettings(s: Record<string, OfflineOptions>) {
+  try { localStorage.setItem(SETTINGS_KEY, JSON.stringify(s)); } catch { /* storage blocked */ }
+}
+
+export interface OfflineStatus { savedAt: number; bytes: number; files: number; options: OfflineOptions }
+
+export async function offlineStatus(boatId: string): Promise<OfflineStatus | undefined> {
+  const options = offlineSettings()[boatId];
+  const s = await snapshot(boatId);
+  if (!options || !s) return undefined;
+  const files = await Promise.all(s.fileKeys.map(k => local.get<local.SavedFile>(FILES, k)));
+  return { savedAt: s.savedAt, files: s.fileKeys.length, bytes: files.reduce((n, f) => n + (f?.size ?? 0), 0), options };
+}
+
+/** When the newest saved copy was made (for the "offline" banner). */
+export async function lastSavedAt() {
+  const all = await snapshots();
+  return all.length ? Math.max(...all.map(s => s.savedAt)) : undefined;
+}
+
+/** What a full download would include, to show before saving. */
+export async function offlineEstimate(boatId: string) {
+  const [items, docs, locations, containers] = await Promise.all([
+    supabase.from("items").select("photo_path").eq("boat_id", boatId).not("photo_path", "is", null),
+    supabase.from("item_documents").select("size").eq("boat_id", boatId),
+    supabase.from("locations").select("photo_path").eq("boat_id", boatId).not("photo_path", "is", null),
+    supabase.from("containers").select("photo_path").eq("boat_id", boatId).not("photo_path", "is", null),
+  ]);
+  const photoCount = [items, locations, containers].reduce((n, r) => n + (check(r) as unknown[]).length, 0);
+  const docRows = check(docs) as { size: number }[];
+  return { photos: photoCount, docs: docRows.length, docBytes: docRows.reduce((n, d) => n + Number(d.size), 0) };
+}
+
+/**
+ * Download (or refresh) the copy of a boat on this device. Only files not already saved are
+ * downloaded, so refreshing is quick. `onProgress` gets (files done, files to fetch).
+ */
+export async function saveBoatOffline(boatId: string, userId: string, options: OfflineOptions,
+  onProgress?: (done: number, total: number) => void) {
+  setOfflineSettings({ ...offlineSettings(), [boatId]: options });
+  // Ask the browser not to clear this data when space runs low (not all browsers allow it).
+  navigator.storage?.persist?.().catch(() => {});
+
+  const [boat, decks, locations, containers, items, documents, role, crew] = await Promise.all([
+    supabase.from("boats").select("*").eq("id", boatId).single(),
+    supabase.from("decks").select("*").eq("boat_id", boatId),
+    supabase.from("locations").select("*").eq("boat_id", boatId),
+    supabase.from("containers").select("*").eq("boat_id", boatId),
+    supabase.from("items").select(ITEM_SELECT).eq("boat_id", boatId),
+    supabase.from("item_documents").select("*").eq("boat_id", boatId),
+    myRole(userId, boatId),
+    boatCrew(boatId),
+  ]);
+  const snap: Snapshot = {
+    boatId, savedAt: Date.now(), role: role ?? "viewer", crew, fileKeys: [],
+    boat: check(boat) as BoatRow, decks: check(decks) as DeckRow[], locations: check(locations) as LocationRow[],
+    containers: check(containers) as ContainerRow[], items: check(items) as ItemRow[], documents: check(documents) as DocumentRow[],
+  };
+
+  // Which files to keep: deck layouts always; other photos and documents if chosen.
+  const wanted: [string, string][] = snap.decks.filter(d => d.photo_path).map(d => [PHOTOS, d.photo_path!]);
+  if (options.photos) {
+    const paths = [snap.boat.photo_path, ...snap.locations.map(l => l.photo_path), ...snap.containers.map(c => c.photo_path), ...snap.items.map(i => i.photo_path)];
+    for (const p of paths) if (p) wanted.push([PHOTOS, p]);
+  }
+  if (options.docs) for (const d of snap.documents) wanted.push([DOCUMENTS, d.path]);
+
+  const have = new Set(await local.allKeys(FILES));
+  const missing = wanted.filter(([b, p]) => !have.has(local.fileKey(b, p)));
+  let done = 0;
+  onProgress?.(0, missing.length);
+  // A few at a time, so one big manual doesn't hold everything up.
+  const queue = [...missing];
+  const worker = async () => {
+    for (let next = queue.shift(); next; next = queue.shift()) {
+      const [bucket, path] = next;
+      const { data, error } = await supabase.storage.from(bucket).download(path);
+      if (!error && data) await local.put<local.SavedFile>(FILES, { key: local.fileKey(bucket, path), blob: data, size: data.size });
+      onProgress?.(++done, missing.length);
+    }
+  };
+  await Promise.all([worker(), worker(), worker()]);
+
+  snap.fileKeys = wanted.map(([b, p]) => local.fileKey(b, p));
+  await local.put("snapshots", snap);
+  snapCache = null;
+  await pruneFiles();
+}
+
+/** Stop keeping a boat on this device and free the space. */
+export async function removeBoatOffline(boatId: string) {
+  const s = offlineSettings();
+  delete s[boatId];
+  setOfflineSettings(s);
+  await local.remove("snapshots", boatId);
+  snapCache = null;
+  await pruneFiles();
+}
+
+/** Delete saved files that no boat on this device uses any more. */
+async function pruneFiles() {
+  const used = new Set((await snapshots()).flatMap(s => s.fileKeys));
+  for (const key of await local.allKeys(FILES)) {
+    if (used.has(key)) continue;
+    await local.remove(FILES, key);
+    const url = fileUrls.get(key);
+    if (url) { URL.revokeObjectURL(url); fileUrls.delete(key); }
+  }
+}
+
+let refreshing: Promise<void> | null = null;
+/** Bring every boat kept on this device up to date (when there's a connection). */
+export function refreshOfflineBoats(userId: string) {
+  if (!navigator.onLine) return Promise.resolve();
+  refreshing ??= (async () => {
+    try {
+      for (const [boatId, options] of Object.entries(offlineSettings())) {
+        try {
+          await saveBoatOffline(boatId, userId, options);
+        } catch (err) {
+          console.warn("Couldn't refresh the offline copy; will try again next time.", err);
+        }
+      }
+    } finally { refreshing = null; }
+  })();
+  return refreshing;
 }
