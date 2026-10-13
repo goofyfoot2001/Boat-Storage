@@ -6,14 +6,38 @@
 //   Code, styles, fonts, logo: saved on first use (their names change with every update).
 //   Anything else (Supabase, other sites): not touched.
 
-const CACHE = "bsm-app-v1";
+const CACHE = "bsm-app-v2";
 const SCOPE = self.registration.scope; // e.g. https://…/Boat-Storage/
 const PAGE = SCOPE; // the app's single page
 
 self.addEventListener("install", event => {
-  event.waitUntil(caches.open(CACHE).then(c => c.add(new Request(PAGE, { cache: "reload" }))).catch(() => {}));
+  event.waitUntil((async () => {
+    const res = await fetch(new Request(PAGE, { cache: "reload" }));
+    const cache = await caches.open(CACHE);
+    await cache.put(PAGE, res.clone());
+    await saveWhatThePageNeeds(cache, await res.text());
+  })().catch(() => {}));
   self.skipWaiting();
 });
+
+/**
+ * Save the code, styles, fonts and logo a page uses right away — not just when they're next
+ * requested — so the app opens offline even after a single visit.
+ */
+async function saveWhatThePageNeeds(cache, html) {
+  const urls = new Set([new URL("logo.png", SCOPE).href]);
+  for (const m of html.matchAll(/(?:src|href)="([^"]*\/assets\/[^"]+)"/g)) urls.add(new URL(m[1], SCOPE).href);
+  for (const url of [...urls]) {
+    if (!url.endsWith(".css")) continue;
+    const css = await (await fetch(url)).text().catch(() => "");
+    for (const m of css.matchAll(/url\(([^)]+)\)/g)) urls.add(new URL(m[1].replace(/["']/g, ""), url).href);
+  }
+  await Promise.all([...urls].map(async url => {
+    if (await cache.match(url)) return;
+    const r = await fetch(url).catch(() => null);
+    if (r?.ok) await cache.put(url, r);
+  }));
+}
 
 self.addEventListener("activate", event => {
   event.waitUntil((async () => {
@@ -36,9 +60,11 @@ async function pageFirstFromNetwork(req) {
     const res = await fetch(req);
     if (res.ok || res.status === 404) {
       // GitHub Pages answers app links like /invite/… with the app page and a 404 status.
-      const copy = res.status === 404 ? new Response(await res.clone().text(), { headers: res.headers }) : res.clone();
+      const html = await res.clone().text();
+      const copy = res.status === 404 ? new Response(html, { headers: res.headers }) : res.clone();
       await cache.put(PAGE, copy);
-      pruneOldAssets(cache, await res.clone().text());
+      // After an update: save the new code now, and drop what the old version used.
+      saveWhatThePageNeeds(cache, html).then(() => pruneOldAssets(cache, html)).catch(() => {});
     }
     return res;
   } catch {
