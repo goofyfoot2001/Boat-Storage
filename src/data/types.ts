@@ -59,6 +59,8 @@ export interface ItemDocument {
   path: string;
   size: number;
   mimeType: string | null;
+  /** Small preview picture (pictures and PDFs), in the photos bucket. */
+  thumbPath: string | null;
 }
 
 export interface Deck {

@@ -1,6 +1,7 @@
 // Everything the screens need to read and change data goes through here.
 // Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
 // With no signal, reads fall back to the copy of a boat saved on this device (see "Offline" below).
+import { canThumb, makeDocThumb } from "../lib/docThumb";
 import * as local from "./offlineDb";
 import { supabase } from "./supabase";
 import type { Boat, Container, Deck, Item, ItemDocument, Location } from "./types";
@@ -57,6 +58,28 @@ export async function signIn(email: string, password: string) {
   }
 }
 
+/**
+ * Email a link for choosing a new password. Opening the link signs the person in and the app
+ * then asks for the new password. (Says nothing about whether the email has an account.)
+ */
+export async function requestPasswordReset(email: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), {
+    redirectTo: new URL(import.meta.env.BASE_URL, window.location.origin).href,
+  });
+  if (error) {
+    if (/rate limit|seconds/i.test(error.message)) throw new Error("Too many requests. Please wait a minute and try again.");
+    throw new Error("Couldn't send the email. Please check the address and try again.");
+  }
+}
+
+export async function setNewPassword(password: string) {
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) {
+    if (/different from the old/i.test(error.message)) throw new Error("Please choose a password different from your old one.");
+    throw new Error(error.message);
+  }
+}
+
 export async function signOut() {
   await supabase.auth.signOut();
 }
@@ -96,15 +119,20 @@ async function removePhotos(paths: (string | null)[]) {
 
 const DOCUMENTS = "documents";
 
-async function removeDocs(paths: string[]) {
-  if (paths.length) await supabase.storage.from(DOCUMENTS).remove(paths);
+/** Document files and their preview pictures (which live in the photos bucket). */
+interface DocFiles { docs: string[]; thumbs: (string | null)[] }
+
+async function removeDocs({ docs, thumbs }: DocFiles) {
+  if (docs.length) await supabase.storage.from(DOCUMENTS).remove(docs);
+  await removePhotos(thumbs);
 }
 
-/** Storage paths of every document attached to these items. */
-async function docPathsForItems(itemIds: string[]) {
-  if (!itemIds.length) return [];
-  const rows = check(await supabase.from("item_documents").select("path").in("item_id", itemIds)) as { path: string }[];
-  return rows.map(r => r.path);
+/** Every document (and preview) attached to these items, so they can be cleared out of storage. */
+async function docPathsForItems(itemIds: string[]): Promise<DocFiles> {
+  if (!itemIds.length) return { docs: [], thumbs: [] };
+  const rows = check(await supabase.from("item_documents").select("path, thumb_path").in("item_id", itemIds)) as
+    { path: string; thumb_path: string | null }[];
+  return { docs: rows.map(r => r.path), thumbs: rows.map(r => r.thumb_path) };
 }
 
 /** photo: a new Blob replaces the old one, null removes it, undefined leaves it alone. */
@@ -229,19 +257,20 @@ export async function reorderDecks(decks: Deck[]) {
 }
 
 /** Photos and documents of every location, container and item on these decks, so they can be cleared out of storage. */
-async function filesOnDecks(deckIds: string[]) {
-  if (!deckIds.length) return { photos: [], docs: [] };
+async function filesOnDecks(deckIds: string[]): Promise<{ photos: (string | null)[]; docs: DocFiles }> {
+  if (!deckIds.length) return { photos: [], docs: { docs: [], thumbs: [] } };
   type Row = {
     photo_path: string | null;
-    items: { photo_path: string | null; item_documents: { path: string }[] }[];
+    items: { photo_path: string | null; item_documents: { path: string; thumb_path: string | null }[] }[];
     containers: { photo_path: string | null }[];
   };
   const rows = check(await supabase.from("locations")
-    .select("photo_path, items(photo_path, item_documents(path)), containers(photo_path)")
+    .select("photo_path, items(photo_path, item_documents(path, thumb_path)), containers(photo_path)")
     .in("deck_id", deckIds)) as Row[];
+  const docs = rows.flatMap(r => r.items.flatMap(i => i.item_documents));
   return {
     photos: rows.flatMap(r => [r.photo_path, ...r.items.map(i => i.photo_path), ...r.containers.map(c => c.photo_path)]),
-    docs: rows.flatMap(r => r.items.flatMap(i => i.item_documents.map(d => d.path))),
+    docs: { docs: docs.map(d => d.path), thumbs: docs.map(d => d.thumb_path) },
   };
 }
 
@@ -480,10 +509,38 @@ export async function deleteItem(item: Item) {
 /** Supabase's free plan accepts uploads up to 50 MB. */
 export const MAX_DOCUMENT_BYTES = 50 * 1024 * 1024;
 
-interface DocumentRow { id: string; item_id: string; name: string; path: string; size: number; mime_type: string | null }
+interface DocumentRow {
+  id: string; item_id: string; name: string; path: string; size: number; mime_type: string | null; thumb_path: string | null;
+}
 const toDocument = (r: DocumentRow): ItemDocument => ({
   id: r.id, itemId: r.item_id, name: r.name, path: r.path, size: Number(r.size), mimeType: r.mime_type,
+  thumbPath: r.thumb_path ?? null,
 });
+
+/** Make and upload a small preview for a document (pictures and PDFs only). */
+async function uploadDocThumb(boatId: string, file: Blob, mime: string | null) {
+  if (!canThumb(mime)) return null;
+  const thumb = await makeDocThumb(file, mime);
+  if (!thumb) return null;
+  const path = `boats/${boatId}/thumbs/${crypto.randomUUID()}.jpg`;
+  const { error } = await supabase.storage.from(PHOTOS).upload(path, thumb, { contentType: "image/jpeg" });
+  return error ? null : path;
+}
+
+/**
+ * Give an older document its preview (documents uploaded before previews existed).
+ * Returns true if one was added.
+ */
+export async function addMissingDocThumb(boatId: string, doc: ItemDocument) {
+  if (doc.thumbPath || !canThumb(doc.mimeType) || !navigator.onLine) return false;
+  const { data } = await supabase.storage.from(DOCUMENTS).download(doc.path);
+  if (!data) return false;
+  const thumb_path = await uploadDocThumb(boatId, data, doc.mimeType);
+  if (!thumb_path) return false;
+  const { error } = await supabase.from("item_documents").update({ thumb_path }).eq("id", doc.id);
+  if (error) { await removePhotos([thumb_path]); return false; }
+  return true;
+}
 
 export async function listDocuments(itemId: string) {
   return readOr(async () => {
@@ -498,18 +555,19 @@ export async function attachDocument(boatId: string, itemId: string, file: File)
   // Stored under a random name; the original file name is kept in the database for display.
   const path = `boats/${boatId}/docs/${itemId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`;
   check(await supabase.storage.from(DOCUMENTS).upload(path, file, { contentType: file.type || "application/octet-stream" }));
+  const thumb_path = await uploadDocThumb(boatId, file, file.type || null);
   const { error } = await supabase.from("item_documents").insert({
-    item_id: itemId, name: file.name.slice(0, 255), path, size: file.size, mime_type: file.type || null,
+    item_id: itemId, name: file.name.slice(0, 255), path, size: file.size, mime_type: file.type || null, thumb_path,
   });
   if (error) {
-    await removeDocs([path]); // don't leave an orphaned file behind
+    await removeDocs({ docs: [path], thumbs: [thumb_path] }); // don't leave orphaned files behind
     throw new Error(error.message);
   }
 }
 
 export async function deleteDocument(doc: ItemDocument) {
   check(await supabase.from("item_documents").delete().eq("id", doc.id));
-  await removeDocs([doc.path]);
+  await removeDocs({ docs: [doc.path], thumbs: [doc.thumbPath] });
 }
 
 /** Types a browser can show by itself; everything else is downloaded / handed to the phone's viewer. */
@@ -754,6 +812,8 @@ export async function saveBoatOffline(boatId: string, userId: string, options: O
     for (const p of paths) if (p) wanted.push([PHOTOS, p]);
   }
   if (options.docs) for (const d of snap.documents) wanted.push([DOCUMENTS, d.path]);
+  // Document previews are tiny; keep them whenever photos or documents are kept.
+  if (options.docs || options.photos) for (const d of snap.documents) if (d.thumb_path) wanted.push([PHOTOS, d.thumb_path]);
 
   const have = new Set(await local.allKeys(FILES));
   const missing = wanted.filter(([b, p]) => !have.has(local.fileKey(b, p)));

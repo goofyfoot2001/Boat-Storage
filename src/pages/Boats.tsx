@@ -5,6 +5,8 @@ import { AppHeader } from "../components/AppHeader";
 import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
 import { NamePhotoForm } from "../components/NamePhotoForm";
+import { NewPasswordForm } from "../components/NewPasswordForm";
+import { Sheet } from "../components/Sheet";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat } from "../data/types";
@@ -24,6 +26,8 @@ export function Boats() {
   const [roles, setRoles] = useState<Record<string, store.BoatRole>>({});
   const [invites, setInvites] = useState<Awaited<ReturnType<typeof store.myInvites>>>([]);
   const [inviteError, setInviteError] = useState("");
+  const [changingPassword, setChangingPassword] = useState(false);
+  const [passwordChanged, setPasswordChanged] = useState(false);
 
   const load = useCallback(async () => {
     const [list, counts, mine, waiting] = await Promise.all([
@@ -130,9 +134,25 @@ export function Boats() {
 
       <footer className="account">
         <span>Signed in as {session?.email}</span>
-        <button className="btn link small" onClick={signOut}><Icon name="log-out" size={16} /> Sign out</button>
+        <span className="row">
+          {online && <button className="btn link small" onClick={() => setChangingPassword(true)}>Change password</button>}
+          <button className="btn link small" onClick={signOut}><Icon name="log-out" size={16} /> Sign out</button>
+        </span>
         <span className="version">Version {__BUILD__}</span>
       </footer>
+
+      {changingPassword && (
+        <Sheet title={passwordChanged ? "Password changed" : "Change password"} onClose={() => { setChangingPassword(false); setPasswordChanged(false); }}>
+          {passwordChanged ? (
+            <div className="form">
+              <p>Your new password is saved. Use it next time you sign in.</p>
+              <button className="btn primary block" onClick={() => { setChangingPassword(false); setPasswordChanged(false); }}>Done</button>
+            </div>
+          ) : (
+            <NewPasswordForm onDone={() => setPasswordChanged(true)} onCancel={() => setChangingPassword(false)} />
+          )}
+        </Sheet>
+      )}
 
       {adding && (
         <NamePhotoForm title="Add a boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"

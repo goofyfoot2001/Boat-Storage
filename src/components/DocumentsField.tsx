@@ -1,8 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import * as store from "../data/store";
 import type { ItemDocument } from "../data/types";
+import { canThumb, typeColor } from "../lib/docThumb";
 import { fileExt, formatBytes } from "../lib/format";
 import { Icon } from "./Icon";
+import { usePhotoUrl } from "./usePhotoUrl";
 
 const VIEWABLE = /^(application\/pdf|image\/|text\/plain)/;
 
@@ -38,6 +40,25 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
     setOnPhone(new Set(saved.filter(([, yes]) => yes).map(([id]) => id)));
   }, [itemId]);
   useEffect(() => { load(); }, [load]);
+
+  // Documents uploaded before previews existed get one the first time an editor opens the item.
+  useEffect(() => {
+    if (readOnly || !navigator.onLine) return;
+    const missing = docs.filter(d => !d.thumbPath && canThumb(d.mimeType));
+    if (!missing.length) return;
+    let cancelled = false;
+    (async () => {
+      let added = false;
+      for (const d of missing) {
+        if (cancelled) return;
+        added = (await store.addMissingDocThumb(boatId, d).catch(() => false)) || added;
+      }
+      if (added && !cancelled) load();
+    })();
+    return () => { cancelled = true; };
+    // Only when the list itself changes, not on every render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [docs.map(d => d.id + (d.thumbPath ?? "")).join()]);
 
   async function pick(list: FileList | null) {
     const files = [...(list ?? [])];
@@ -96,7 +117,7 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
           {docs.map(doc => (
             <li key={doc.id}>
               <button type="button" className="doc-open" onClick={() => open(doc)}>
-                <span className="doc-badge">{fileExt(doc.name)}</span>
+                <DocThumb name={doc.name} thumbPath={doc.thumbPath} />
                 <span className="doc-name">{doc.name}</span>
                 <span className="muted">{formatBytes(doc.size)}</span>
                 {onPhone.has(doc.id) && <span className="doc-saved" title="Saved on this phone"><Icon name="check" size={14} /></span>}
@@ -116,7 +137,7 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
           {queued.map((f, i) => (
             <li key={`q${i}`}>
               <span className="doc-open">
-                <span className="doc-badge">{fileExt(f.name)}</span>
+                <DocThumb name={f.name} file={f} />
                 <span className="doc-name">{f.name}</span>
                 <span className="muted">{formatBytes(f.size)}</span>
               </span>
@@ -127,7 +148,7 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
           ))}
           {uploading.map(n => (
             <li key={`u${n}`} className="doc-uploading">
-              <span className="doc-open"><span className="doc-badge">{fileExt(n)}</span><span className="doc-name">{n}</span><span className="muted">Uploading…</span></span>
+              <span className="doc-open"><DocThumb name={n} /><span className="doc-name">{n}</span><span className="muted">Uploading…</span></span>
             </li>
           ))}
         </ul>
@@ -144,4 +165,11 @@ export function DocumentsField({ boatId, itemId, queued, onQueue, onChanged, rea
       {error && <p className="error">{error}</p>}
     </div>
   );
+}
+
+/** A document's preview: its thumbnail if it has one (or it's a picture not uploaded yet), else a colored type tile. */
+function DocThumb({ name, thumbPath, file }: { name: string; thumbPath?: string | null; file?: File }) {
+  const url = usePhotoUrl(thumbPath ?? (file?.type.startsWith("image/") ? file : null));
+  if (url) return <img className="doc-thumb" src={url} alt="" />;
+  return <span className="doc-thumb doc-tile" style={{ background: typeColor(name) }}>{fileExt(name)}</span>;
 }

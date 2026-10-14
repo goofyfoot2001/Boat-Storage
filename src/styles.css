@@ -253,6 +253,15 @@ button.doc-open:active { background: #EEF3F8; }
   flex: none; min-width: 42px; padding: 4px 4px; border-radius: 6px; text-align: center;
   font-size: 10px; font-weight: 700; letter-spacing: 0.3px; background: var(--tint-soft); color: var(--tint);
 }
+/* Portrait, like a page: a real preview, or a colored tile with the file type */
+.doc-thumb {
+  flex: none; width: 36px; height: 46px; border-radius: 5px; object-fit: cover; object-position: top;
+  border: 1px solid var(--border); background: #fff;
+}
+.doc-tile {
+  display: grid; place-items: center; border: 0; color: #fff;
+  font-size: 9px; font-weight: 700; letter-spacing: 0.2px;
+}
 .doc-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .doc-remove { flex: none; width: 44px; align-self: stretch; border: 0; background: none; color: var(--muted); }
 .doc-confirm { display: flex; gap: 6px; padding-right: 8px; }
@@ -447,3 +456,4 @@ button.doc-open:active { background: #EEF3F8; }
 .login .tagline { color: var(--text-2); margin: 4px 0 28px; }
 .login .card { width: 100%; padding: 20px; }
 .login .card h2 { font-size: 19px; font-weight: 700; }
+.btn.link.forgot { align-self: flex-end; min-height: 32px; padding: 0 2px; margin-top: -8px; font-size: 14px; }

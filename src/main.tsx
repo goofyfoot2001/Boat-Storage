@@ -2,6 +2,7 @@ import { StrictMode, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
+import { NewPasswordForm } from "./components/NewPasswordForm";
 import { OfflineBanner } from "./components/OfflineBanner";
 import { refreshOfflineBoats } from "./data/store";
 import { BoatDecks } from "./pages/BoatDecks";
@@ -23,8 +24,22 @@ function pendingInvite() {
 }
 
 function App() {
-  const { session } = useAuth();
+  const { session, choosingNewPassword, doneChoosingPassword } = useAuth();
   const { pathname } = useLocation();
+
+  // Opened the link in a "reset your password" email: they're signed in; now pick the new password.
+  if (session && choosingNewPassword) {
+    return (
+      <main className="login">
+        <img className="login-logo" src={`${import.meta.env.BASE_URL}logo.png`} alt="" />
+        <div className="card form" style={{ marginTop: 28, width: "100%" }}>
+          <h2>Choose a new password</h2>
+          <p className="muted">For {session.email}</p>
+          <NewPasswordForm onDone={doneChoosingPassword} />
+        </div>
+      </main>
+    );
+  }
 
   // Invite links work signed in or out.
   if (pathname.startsWith("/invite/")) {

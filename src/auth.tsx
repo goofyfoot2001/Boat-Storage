@@ -1,12 +1,15 @@
 import { createContext, useContext, useEffect, useState, type ReactNode } from "react";
 import * as store from "./data/store";
-import { supabase } from "./data/supabase";
+import { openedFromPasswordReset, supabase } from "./data/supabase";
 
 interface AuthValue {
   session: store.Session | null;
   signIn: typeof store.signIn;
   signUp: typeof store.signUp;
   signOut: () => void;
+  /** Arrived from a password-reset email: ask for a new password before anything else. */
+  choosingNewPassword: boolean;
+  doneChoosingPassword: () => void;
 }
 
 const AuthContext = createContext<AuthValue | null>(null);
@@ -14,6 +17,7 @@ const AuthContext = createContext<AuthValue | null>(null);
 export function AuthProvider({ children }: { children: ReactNode }) {
   // undefined = still checking whether someone is already signed in
   const [session, setSession] = useState<store.Session | null | undefined>(undefined);
+  const [choosingNewPassword, setChoosingNewPassword] = useState(openedFromPasswordReset);
 
   useEffect(() => {
     // Offshore the sign-in can't be renewed, so carry on as the person last signed in on this
@@ -22,7 +26,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       const saved = savedSignIn();
       if (saved) setSession(saved);
     }
-    const { data } = supabase.auth.onAuthStateChange((_event, s) => {
+    const { data } = supabase.auth.onAuthStateChange((event, s) => {
+      if (event === "PASSWORD_RECOVERY") setChoosingNewPassword(true);
       if (s) setSession({ userId: s.user.id, email: s.user.email ?? "" });
       else setSession(!navigator.onLine ? savedSignIn() : null);
     });
@@ -39,7 +44,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       store.signOut();
       forgetSavedSignIn();
       setSession(null);
+      setChoosingNewPassword(false);
     },
+    choosingNewPassword,
+    doneChoosingPassword: () => setChoosingNewPassword(false),
   };
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
