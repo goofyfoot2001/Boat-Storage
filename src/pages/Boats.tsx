@@ -10,6 +10,7 @@ import { Sheet } from "../components/Sheet";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat } from "../data/types";
+import { mayLoseSavedData } from "../lib/device";
 import { move } from "../lib/move";
 import { useOnline, useReloadOnReconnect } from "../lib/useOnline";
 
@@ -213,6 +214,15 @@ function BoatHomeField({ value, onChange, online }: { value: store.BoatHome; onC
             so if this phone is lost or the app's data is cleared, the boat is gone.</small>
         </span>
       </label>
+      {value === "phone" && mayLoseSavedData && (
+        <p className="hint warning">
+          <Icon name="alert-triangle" size={14} />
+          <span>
+            On iPhone, add this site to your Home Screen first (Share → Add to Home Screen) and open it from there.
+            In a Safari tab, the boat can be wiped if you don't open the site for about a week.
+          </span>
+        </p>
+      )}
       <span className="field-hint">This can't be changed later.</span>
     </div>
   );

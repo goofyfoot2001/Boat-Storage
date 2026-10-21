@@ -61,6 +61,8 @@ img { display: block; max-width: 100%; }
 .section-title { font-size: 13px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.6px; margin: 4px 4px 0; }
 .hint { font-size: 13px; color: var(--text-2); background: var(--tint-soft); border-radius: 10px; padding: 9px 12px; display: flex; align-items: center; gap: 6px; }
 .hint.centered { justify-content: center; background: none; }
+.hint.warning { align-items: flex-start; background: #FFF6E5; color: #8A5300; }
+.hint.warning svg { flex: none; margin-top: 2px; }
 
 .account { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 36px; font-size: 13px; color: var(--muted); }
 .version { font-size: 11px; opacity: 0.7; }

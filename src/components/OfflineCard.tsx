@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useState } from "react";
 import { useUserId } from "../auth";
 import * as store from "../data/store";
+import { mayLoseSavedData } from "../lib/device";
 import { formatBytes, plural } from "../lib/format";
 import { useOnline } from "../lib/useOnline";
 import { Icon } from "./Icon";
 import { Sheet } from "./Sheet";
 
 const when = (t: number) => new Date(t).toLocaleString(undefined, { weekday: "short", hour: "numeric", minute: "2-digit" });
-const isIPhone = /iPhone|iPad|iPod/.test(navigator.userAgent);
-const fromHomeScreen = matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone === true;
 
 /** "Keep on this phone" for a boat: what's saved, when, how big — and the settings to change it. */
 export function OfflineCard({ boatId, boatName }: { boatId: string; boatName: string }) {
@@ -104,7 +103,7 @@ function OfflineSheet({ boatId, boatName, userId, online, status, onChanged, onC
           </label>
         </div>
 
-        {isIPhone && !fromHomeScreen && (
+        {mayLoseSavedData && (
           <p className="hint">
             <Icon name="alert-triangle" size={14} />
             On iPhone, add this site to your Home Screen (Share → Add to Home Screen) and open it from there —
