@@ -116,6 +116,10 @@ a.row-card-main:active { background: #EEF3F8; }
 .card-edit:active { background: var(--tint-soft); }
 .reorder { display: flex; flex-direction: column; justify-content: center; gap: 6px; padding: 0 10px; }
 .deck-thumb { width: 44px; height: 44px; border-radius: 12px; }
+/* Deck layouts are usually long and narrow, so show the whole picture rather than crop it. */
+.deck-photo { width: 72px; height: 54px; border-radius: 10px; }
+.deck-photo.has-photo { background: #fff; border: 1px solid var(--border); }
+.deck-photo.has-photo img { object-fit: contain; }
 
 /* ── Deck layout with storage dots ──────────────────────────────────── */
 .plan { background: #F7FAFC; position: relative; }
