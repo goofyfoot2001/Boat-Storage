@@ -10,16 +10,18 @@ import { Sheet } from "../components/Sheet";
 import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import type { Boat } from "../data/types";
+import { mayLoseSavedData } from "../lib/device";
 import { move } from "../lib/move";
 import { useOnline, useReloadOnReconnect } from "../lib/useOnline";
 
 export function Boats() {
   const userId = useUserId();
   const { session, signOut } = useAuth();
-  const online = useOnline(); // adding and editing need a connection
+  const online = useOnline(); // cloud boats need a connection to add or change; phone-only boats don't
   const [boats, setBoats] = useState<Boat[] | null>(null);
   const [deckCounts, setDeckCounts] = useState<Record<string, number>>({});
   const [adding, setAdding] = useState(false);
+  const [home, setHome] = useState<store.BoatHome>("cloud");
   const [editing, setEditing] = useState<Boat | null>(null);
   const [deleting, setDeleting] = useState<Boat | null>(null);
   const [reordering, setReordering] = useState(false);
@@ -45,6 +47,11 @@ export function Boats() {
   // Your own boats first (you can reorder those); boats others shared with you after.
   const owned = boats?.filter(b => roles[b.id] === "owner") ?? [];
   const shared = boats?.filter(b => roles[b.id] && roles[b.id] !== "owner") ?? [];
+
+  function startAdding() {
+    setHome("cloud");
+    setAdding(true);
+  }
 
   async function reorder(index: number, by: -1 | 1) {
     const next = move(owned, index, by);
@@ -74,9 +81,9 @@ export function Boats() {
                 <Icon name="chevron-down" size={18} />
               </button>
             )}
-            {online && <button className="icon-btn primary" onClick={() => setAdding(true)} aria-label="Add boat">
+            <button className="icon-btn primary" onClick={startAdding} aria-label="Add boat">
               <Icon name="plus" size={22} />
-            </button>}
+            </button>
           </>
         )}
       />
@@ -109,15 +116,17 @@ export function Boats() {
           <div className="empty">
             <Icon name="anchor" size={48} />
             <h3>{online ? "No boats of your own yet" : "No boats saved on this phone"}</h3>
-            <p>{online ? "Add your first boat to start mapping where everything is stored." : "When you have signal, open a boat and use Offline → Save to this phone."}</p>
-            {online && <button className="btn primary" onClick={() => setAdding(true)}><Icon name="plus" size={18} /> Add a boat</button>}
+            <p>{online ? "Add your first boat to start mapping where everything is stored."
+              : "When you have signal, open a boat and use Offline → Save to this phone. Or add a boat that's kept only on this phone."}</p>
+            <button className="btn primary" onClick={startAdding}><Icon name="plus" size={18} /> Add a boat</button>
           </div>
         )}
 
         {owned.map((boat, i) => (
           <BoatCard key={boat.id} boat={boat} deckCount={deckCounts[boat.id] ?? 0}
+            badge={boat.phoneOnly ? "On this phone" : undefined}
             reordering={reordering} isFirst={i === 0} isLast={i === owned.length - 1}
-            onEdit={online ? () => setEditing(boat) : undefined} onMove={by => reorder(i, by)} />
+            onEdit={online || boat.phoneOnly ? () => setEditing(boat) : undefined} onMove={by => reorder(i, by)} />
         ))}
 
         {shared.length > 0 && !reordering && (
@@ -157,8 +166,10 @@ export function Boats() {
       {adding && (
         <NamePhotoForm title="Add a boat" nameLabel="Boat name" namePlaceholder="e.g. Sea Breeze"
           photoLabel="Boat picture" photoHint="Take a photo or choose one" submitLabel="Add boat"
-          onSubmit={async (name, photo) => { await store.addBoat(name, photo ?? null, boats?.length ?? 0); await load(); }}
-          onClose={() => setAdding(false)} />
+          onSubmit={async (name, photo) => { await store.addBoat(name, photo ?? null, boats?.length ?? 0, online ? home : "phone", userId); await load(); }}
+          onClose={() => setAdding(false)}>
+          <BoatHomeField value={online ? home : "phone"} onChange={setHome} online={online} />
+        </NamePhotoForm>
       )}
 
       {editing && (
@@ -182,10 +193,45 @@ export function Boats() {
   );
 }
 
+/** Asked once, when a boat is added: kept in the cloud, or only on this phone. */
+function BoatHomeField({ value, onChange, online }: { value: store.BoatHome; onChange: (h: store.BoatHome) => void; online: boolean }) {
+  return (
+    <div className="field">
+      <span>Where to keep this boat</span>
+      <label className={`role-option${value === "cloud" ? " on" : ""}${online ? "" : " disabled"}`}>
+        <input type="radio" name="boat-home" checked={value === "cloud"} disabled={!online} onChange={() => onChange("cloud")} />
+        <span>
+          <strong><Icon name="cloud" size={15} /> Cloud</strong>
+          <small>{online ? "Backed up, on all your devices, and you can invite crew. Changes need signal; you can still save a copy to look at offline."
+            : "Needs a connection to add."}</small>
+        </span>
+      </label>
+      <label className={`role-option${value === "phone" ? " on" : ""}`}>
+        <input type="radio" name="boat-home" checked={value === "phone"} onChange={() => onChange("phone")} />
+        <span>
+          <strong><Icon name="smartphone" size={15} /> Only on this phone</strong>
+          <small>Works fully with no signal: add and change anything, anywhere. Not backed up and can't be shared,
+            so if this phone is lost or the app's data is cleared, the boat is gone.</small>
+        </span>
+      </label>
+      {value === "phone" && mayLoseSavedData && (
+        <p className="hint warning">
+          <Icon name="alert-triangle" size={14} />
+          <span>
+            On iPhone, add this site to your Home Screen first (Share → Add to Home Screen) and open it from there.
+            In a Safari tab, the boat can be wiped if you don't open the site for about a week.
+          </span>
+        </p>
+      )}
+      <span className="field-hint">This can't be changed later.</span>
+    </div>
+  );
+}
+
 function BoatCard({ boat, deckCount, badge, reordering, isFirst, isLast, onEdit, onMove }: {
   boat: Boat;
   deckCount: number;
-  /** For boats shared with you: your role on it. */
+  /** For boats shared with you: your role on it. For phone-only boats: "On this phone". */
   badge?: string;
   reordering: boolean;
   isFirst: boolean;

@@ -5,19 +5,25 @@ import { useOnline } from "./useOnline";
 
 /**
  * Your role on a boat: "owner", "crew", "viewer" — or undefined while loading.
- * With no connection everyone is treated as a viewer, since changes can't be saved offline.
+ * With no connection everyone is treated as a viewer, since changes can't be saved offline —
+ * except on boats kept only on this phone, which are changed right here.
  */
 export function useBoatRole(boatId: string | undefined) {
   const userId = useUserId();
   const online = useOnline();
   const [role, setRole] = useState<store.BoatRole | null | undefined>(undefined);
+  const [phoneOnly, setPhoneOnly] = useState(false);
   useEffect(() => {
     if (!boatId) return;
     let cancelled = false;
-    store.myRole(userId, boatId).then(r => !cancelled && setRole(r), () => {});
+    Promise.all([store.myRole(userId, boatId), store.isPhoneOnly(boatId)]).then(([r, p]) => {
+      if (cancelled) return;
+      setRole(r);
+      setPhoneOnly(p);
+    }, () => {});
     return () => { cancelled = true; };
   }, [userId, boatId]);
-  return online || !role ? role : "viewer";
+  return online || phoneOnly || !role ? role : "viewer";
 }
 
 /** A short display name: "pat.smith@gmail.com" → "pat.smith". */

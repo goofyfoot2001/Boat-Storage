@@ -4,6 +4,8 @@ export interface Boat {
   name: string;
   photoPath: string | null;
   sortOrder: number;
+  /** Kept only on this phone: never in the cloud, and can be changed with no signal. */
+  phoneOnly: boolean;
 }
 
 /** A storage spot, shown as a colored dot on a deck layout. x/y are 0–1 across the picture. */

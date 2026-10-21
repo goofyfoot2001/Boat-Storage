@@ -1,6 +1,7 @@
 // Everything the screens need to read and change data goes through here.
 // Row Level Security in Supabase makes sure each user only ever reaches their own rows and photos.
 // With no signal, reads fall back to the copy of a boat saved on this device (see "Offline" below).
+// Boats kept only on this phone never reach Supabase: reads and changes go to the device (see "Phone-only boats").
 import { canThumb, makeDocThumb } from "../lib/docThumb";
 import * as local from "./offlineDb";
 import { supabase } from "./supabase";
@@ -21,9 +22,12 @@ function check<T>(res: { data: T; error: { message: string } | null }): T {
   return res.data;
 }
 
-/** Read from Supabase; if there's no connection, read the saved copy on this device instead. */
-async function readOr<T>(online: () => Promise<T>, offline: () => Promise<T>): Promise<T> {
-  if (!navigator.onLine) return offline();
+/**
+ * Read from Supabase; if there's no connection, read the saved copy on this device instead.
+ * `id` (a boat, deck, location, container or item) on a phone-only boat always reads from the device.
+ */
+async function readOr<T>(online: () => Promise<T>, offline: () => Promise<T>, id?: string): Promise<T> {
+  if (!navigator.onLine || (id && await phoneBoat(id))) return offline();
   try {
     return await online();
   } catch (err) {
@@ -104,9 +108,13 @@ export async function photoUrl(path: string) {
 }
 
 /** Files are kept per boat, so everyone on the boat can see them. */
-async function uploadPhoto(boatId: string, blob: Blob) {
+function newPhotoPath(boatId: string, blob: Blob) {
   const ext = blob.type === "image/png" ? "png" : blob.type === "image/webp" ? "webp" : "jpg";
-  const path = `boats/${boatId}/${crypto.randomUUID()}.${ext}`;
+  return `boats/${boatId}/${crypto.randomUUID()}.${ext}`;
+}
+
+async function uploadPhoto(boatId: string, blob: Blob) {
+  const path = newPhotoPath(boatId, blob);
   check(await supabase.storage.from(PHOTOS).upload(path, blob, { contentType: blob.type || "image/jpeg" }));
   return path;
 }
@@ -146,23 +154,28 @@ async function replacePhoto(boatId: string, oldPath: string | null, photo: Blob 
 // ── Boats ───────────────────────────────────────────────────────────────────
 
 interface BoatRow { id: string; user_id: string; name: string; photo_path: string | null; sort_order: number }
-const toBoat = (r: BoatRow): Boat => ({ id: r.id, userId: r.user_id, name: r.name, photoPath: r.photo_path, sortOrder: r.sort_order });
+const toBoat = (r: BoatRow, phoneOnly = false): Boat => ({
+  id: r.id, userId: r.user_id, name: r.name, photoPath: r.photo_path, sortOrder: r.sort_order, phoneOnly,
+});
+const snapshotBoat = (s: Snapshot) => toBoat(s.boat, !!s.phoneOnly);
 
 export async function listBoats() {
-  return readOr(async () => {
+  const all = await readOr(async () => {
     const rows = check(await supabase.from("boats").select("*").order("sort_order").order("created_at"));
-    return (rows as BoatRow[]).map(toBoat);
-  }, async () => (await snapshots()).map(s => s.boat).sort((a, b) => a.sort_order - b.sort_order).map(toBoat));
+    return [...(rows as BoatRow[]).map(r => toBoat(r)), ...(await phoneBoats()).map(snapshotBoat)];
+  }, async () => (await snapshots()).map(snapshotBoat));
+  return all.sort((a, b) => a.sortOrder - b.sortOrder);
 }
 
 /** Number of decks on each boat, keyed by boat id. */
 export async function deckCounts() {
+  const counted = (list: Snapshot[]) => Object.fromEntries(list.map(s => [s.boatId, s.decks.length]));
   return readOr(async () => {
     const rows = check(await supabase.from("decks").select("boat_id")) as { boat_id: string }[];
     const counts: Record<string, number> = {};
     for (const r of rows) counts[r.boat_id] = (counts[r.boat_id] ?? 0) + 1;
-    return counts;
-  }, async () => Object.fromEntries((await snapshots()).map(s => [s.boatId, s.decks.length])));
+    return { ...counts, ...counted(await phoneBoats()) };
+  }, async () => counted(await snapshots()));
 }
 
 export async function getBoat(id: string) {
@@ -171,11 +184,15 @@ export async function getBoat(id: string) {
     return row ? toBoat(row as BoatRow) : undefined;
   }, async () => {
     const s = await snapshot(id);
-    return s && toBoat(s.boat);
-  });
+    return s && snapshotBoat(s);
+  }, id);
 }
 
-export async function addBoat(name: string, photo: Blob | null, sortOrder: number) {
+/** Where a new boat is kept: in the cloud (shared, backed up), or only on this phone. */
+export type BoatHome = "cloud" | "phone";
+
+export async function addBoat(name: string, photo: Blob | null, sortOrder: number, home: BoatHome, userId: string) {
+  if (home === "phone") return addPhoneBoat(name, photo, sortOrder, userId);
   // The id is made here so the photo can go straight into the new boat's folder. (The database makes
   // the creator the owner as the boat is saved, which is what then allows the upload.)
   const id = crypto.randomUUID();
@@ -187,11 +204,16 @@ export async function addBoat(name: string, photo: Blob | null, sortOrder: numbe
 }
 
 export async function updateBoat(boat: Boat, name: string, photo: Blob | null | undefined) {
+  if (boat.phoneOnly) return changePhoneBoat(boat.id, async s => {
+    s.boat.name = name.trim();
+    s.boat.photo_path = await keepPhoto(s, s.boat.photo_path, photo);
+  });
   const photo_path = await replacePhoto(boat.id, boat.photoPath, photo);
   check(await supabase.from("boats").update({ name: name.trim(), photo_path }).eq("id", boat.id));
 }
 
 export async function deleteBoat(boat: Boat) {
+  if (boat.phoneOnly) return deletePhoneBoat(boat.id);
   // The database removes the boat's decks, locations and items on its own;
   // their photos have to be cleared out of storage separately.
   const decks = check(await supabase.from("decks").select("id, photo_path").eq("boat_id", boat.id)) as { id: string; photo_path: string | null }[];
@@ -202,7 +224,9 @@ export async function deleteBoat(boat: Boat) {
 }
 
 export async function reorderBoats(boats: Boat[]) {
-  await Promise.all(boats.map((b, i) => supabase.from("boats").update({ sort_order: i }).eq("id", b.id)));
+  await Promise.all(boats.map((b, i) => b.phoneOnly
+    ? changePhoneBoat(b.id, s => { s.boat.sort_order = i; })
+    : supabase.from("boats").update({ sort_order: i }).eq("id", b.id)));
 }
 
 // ── Decks ───────────────────────────────────────────────────────────────────
@@ -222,7 +246,7 @@ export async function listDecks(boatId: string) {
     if (!s) return [];
     return [...s.decks].sort((a, b) => a.sort_order - b.sort_order)
       .map(d => toDeck({ ...d, locations: [{ count: s.locations.filter(l => l.deck_id === d.id).length }] }));
-  });
+  }, boatId);
 }
 
 export async function getDeck(id: string) {
@@ -232,20 +256,33 @@ export async function getDeck(id: string) {
   }, async () => {
     const d = (await snapshots()).flatMap(s => s.decks).find(x => x.id === id);
     return d && toDeck(d);
-  });
+  }, id);
 }
 
 export async function addDeck(boatId: string, name: string, photo: Blob | null, sortOrder: number) {
+  if (await phoneBoat(boatId)) return changePhoneBoat(boatId, async s => {
+    s.decks.push({ id: crypto.randomUUID(), user_id: s.boat.user_id, boat_id: boatId, name: name.trim(),
+      photo_path: await keepPhoto(s, null, photo), sort_order: sortOrder });
+  });
   const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   check(await supabase.from("decks").insert({ boat_id: boatId, name: name.trim(), photo_path, sort_order: sortOrder }));
 }
 
 export async function updateDeck(deck: Deck, name: string, photo: Blob | null | undefined) {
+  if (await phoneBoat(deck.id)) return changePhoneBoat(deck.id, async s => {
+    const d = row(s.decks, deck.id);
+    d.name = name.trim();
+    d.photo_path = await keepPhoto(s, d.photo_path, photo);
+  });
   const photo_path = await replacePhoto(deck.boatId, deck.photoPath, photo);
   check(await supabase.from("decks").update({ name: name.trim(), photo_path }).eq("id", deck.id));
 }
 
 export async function deleteDeck(deck: Deck) {
+  if (await phoneBoat(deck.id)) return changePhoneBoat(deck.id, s => {
+    s.decks = s.decks.filter(d => d.id !== deck.id);
+    dropLocations(s, s.locations.filter(l => l.deck_id === deck.id).map(l => l.id));
+  });
   const files = await filesOnDecks([deck.id]);
   check(await supabase.from("decks").delete().eq("id", deck.id));
   await removePhotos([deck.photoPath, ...files.photos]);
@@ -253,6 +290,9 @@ export async function deleteDeck(deck: Deck) {
 }
 
 export async function reorderDecks(decks: Deck[]) {
+  if (decks[0] && await phoneBoat(decks[0].id)) return changePhoneBoat(decks[0].id, s => {
+    decks.forEach((d, i) => { row(s.decks, d.id).sort_order = i; });
+  });
   await Promise.all(decks.map((d, i) => supabase.from("decks").update({ sort_order: i }).eq("id", d.id)));
 }
 
@@ -294,7 +334,7 @@ export async function listLocations(deckId: string) {
     if (!s) return [];
     return s.locations.filter(l => l.deck_id === deckId).sort(byName)
       .map(l => toLocation({ ...l, items: [{ count: s.items.filter(i => i.location_id === l.id).length }] }));
-  });
+  }, deckId);
 }
 
 export async function getLocation(id: string) {
@@ -304,12 +344,18 @@ export async function getLocation(id: string) {
   }, async () => {
     const l = (await snapshots()).flatMap(s => s.locations).find(x => x.id === id);
     return l && toLocation(l);
-  });
+  }, id);
 }
 
 export interface LocationFields { name: string; color: string }
 
 export async function addLocation(boatId: string, deckId: string, x: number, y: number, f: LocationFields, photo: Blob | null) {
+  if (await phoneBoat(boatId)) return changePhoneBoat(boatId, async s => {
+    const l: LocationRow = { id: crypto.randomUUID(), user_id: s.boat.user_id, boat_id: boatId, deck_id: deckId, x, y,
+      name: f.name.trim(), color: f.color, photo_path: await keepPhoto(s, null, photo) };
+    s.locations.push(l);
+    return toLocation(l);
+  });
   const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   const row = check(await supabase.from("locations")
     .insert({ deck_id: deckId, x, y, name: f.name.trim(), color: f.color, photo_path }).select().single());
@@ -317,15 +363,21 @@ export async function addLocation(boatId: string, deckId: string, x: number, y: 
 }
 
 export async function updateLocation(loc: Location, f: LocationFields, photo: Blob | null | undefined) {
+  if (await phoneBoat(loc.id)) return changePhoneBoat(loc.id, async s => {
+    const l = row(s.locations, loc.id);
+    Object.assign(l, { name: f.name.trim(), color: f.color, photo_path: await keepPhoto(s, l.photo_path, photo) });
+  });
   const photo_path = await replacePhoto(loc.boatId, loc.photoPath, photo);
   check(await supabase.from("locations").update({ name: f.name.trim(), color: f.color, photo_path }).eq("id", loc.id));
 }
 
 export async function moveLocation(id: string, x: number, y: number) {
+  if (await phoneBoat(id)) return changePhoneBoat(id, s => { Object.assign(row(s.locations, id), { x, y }); });
   check(await supabase.from("locations").update({ x, y }).eq("id", id));
 }
 
 export async function deleteLocation(loc: Location) {
+  if (await phoneBoat(loc.id)) return changePhoneBoat(loc.id, s => dropLocations(s, [loc.id]));
   const [items, containers] = await Promise.all([listItems(loc.id), listContainers(loc.id)]);
   const docs = await docPathsForItems(items.map(i => i.id));
   check(await supabase.from("locations").delete().eq("id", loc.id));
@@ -348,7 +400,7 @@ export async function listContainers(locationId: string) {
   return readOr(async () => {
     const rows = check(await supabase.from("containers").select("*").eq("location_id", locationId).order("name"));
     return (rows as ContainerRow[]).map(toContainer);
-  }, async () => (await snapshots()).flatMap(s => s.containers).filter(c => c.location_id === locationId).sort(byName).map(toContainer));
+  }, async () => (await snapshots()).flatMap(s => s.containers).filter(c => c.location_id === locationId).sort(byName).map(toContainer), locationId);
 }
 
 export interface ContainerFields { name: string; notes: string; color: string }
@@ -356,11 +408,19 @@ export interface ContainerFields { name: string; notes: string; color: string }
 const containerColumns = (f: ContainerFields) => ({ name: f.name.trim(), notes: f.notes.trim() || null, color: f.color });
 
 export async function addContainer(boatId: string, locationId: string, parentId: string | null, f: ContainerFields, photo: Blob | null) {
+  if (await phoneBoat(boatId)) return changePhoneBoat(boatId, async s => {
+    s.containers.push({ id: crypto.randomUUID(), user_id: s.boat.user_id, boat_id: boatId, location_id: locationId, parent_id: parentId,
+      ...containerColumns(f), photo_path: await keepPhoto(s, null, photo) });
+  });
   const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   check(await supabase.from("containers").insert({ location_id: locationId, parent_id: parentId, ...containerColumns(f), photo_path }));
 }
 
 export async function updateContainer(c: Container, f: ContainerFields, photo: Blob | null | undefined) {
+  if (await phoneBoat(c.id)) return changePhoneBoat(c.id, async s => {
+    const r = row(s.containers, c.id);
+    Object.assign(r, { ...containerColumns(f), photo_path: await keepPhoto(s, r.photo_path, photo) });
+  });
   const photo_path = await replacePhoto(c.boatId, c.photoPath, photo);
   check(await supabase.from("containers").update({ ...containerColumns(f), photo_path }).eq("id", c.id));
 }
@@ -379,6 +439,12 @@ export function subtree(c: Container, all: Container[]): Container[] {
 export async function moveContainer(c: Container, to: { locationId: string; parentId: string | null }, siblings: Container[]) {
   const tree = subtree(c, siblings);
   if (to.parentId && tree.some(t => t.id === to.parentId)) throw new Error("A container can't go inside itself.");
+  if (await phoneBoat(c.id)) return changePhoneBoat(c.id, s => {
+    const ids = new Set(tree.map(t => t.id));
+    row(s.containers, c.id).parent_id = to.parentId;
+    for (const r of s.containers) if (ids.has(r.id)) r.location_id = to.locationId;
+    for (const i of s.items) if (i.container_id && ids.has(i.container_id)) i.location_id = to.locationId;
+  });
   check(await supabase.from("containers").update({ location_id: to.locationId, parent_id: to.parentId }).eq("id", c.id));
   if (to.locationId === c.locationId) return;
   // Changing location: the security rules want each container's parent to be in the same location,
@@ -392,6 +458,17 @@ export async function moveContainer(c: Container, to: { locationId: string; pare
  * location); "all" deletes everything inside it too.
  */
 export async function deleteContainer(c: Container, mode: "keep" | "all", siblings: Container[], items: Item[]) {
+  if (await phoneBoat(c.id)) return changePhoneBoat(c.id, s => {
+    if (mode === "keep") {
+      for (const i of s.items) if (i.container_id === c.id) i.container_id = c.parentId;
+      for (const r of s.containers) if (r.parent_id === c.id) r.parent_id = c.parentId;
+      s.containers = s.containers.filter(r => r.id !== c.id);
+      return;
+    }
+    const ids = new Set(subtree(c, siblings).map(t => t.id));
+    s.containers = s.containers.filter(r => !ids.has(r.id));
+    dropItems(s, s.items.filter(i => i.container_id && ids.has(i.container_id)).map(i => i.id));
+  });
   if (mode === "keep") {
     check(await supabase.from("items").update({ container_id: c.parentId }).eq("container_id", c.id));
     check(await supabase.from("containers").update({ parent_id: c.parentId }).eq("parent_id", c.id));
@@ -428,7 +505,7 @@ export async function listItems(locationId: string) {
   return readOr(async () => {
     const rows = check(await supabase.from("items").select(ITEM_SELECT).eq("location_id", locationId).order("name"));
     return (rows as ItemRow[]).map(toItem);
-  }, async () => (await snapshots()).flatMap(s => s.items).filter(i => i.location_id === locationId).sort(byName).map(toItem));
+  }, async () => (await snapshots()).flatMap(s => s.items).filter(i => i.location_id === locationId).sort(byName).map(toItem), locationId);
 }
 
 export interface ItemFields {
@@ -464,7 +541,7 @@ export async function boatContents(boatId: string): Promise<BoatContents> {
       containers: [...s.containers].sort(byName).map(toContainer),
       items: s.items.map(toItem),
     };
-  });
+  }, boatId);
 }
 
 async function boatContentsOnline(boatId: string): Promise<BoatContents> {
@@ -486,6 +563,12 @@ async function boatContentsOnline(boatId: string): Promise<BoatContents> {
 
 /** Returns the new item's id, so documents picked before saving can be attached to it. */
 export async function addItem(boatId: string, locationId: string, containerId: string | null, f: ItemFields, photo: Blob | null) {
+  if (await phoneBoat(boatId)) return changePhoneBoat(boatId, async s => {
+    const id = crypto.randomUUID();
+    s.items.push({ id, user_id: s.boat.user_id, boat_id: boatId, location_id: locationId, container_id: containerId,
+      ...itemColumns(f), photo_path: await keepPhoto(s, null, photo) });
+    return id;
+  });
   const photo_path = photo ? await uploadPhoto(boatId, photo) : null;
   const row = check(await supabase.from("items")
     .insert({ location_id: locationId, container_id: containerId, ...itemColumns(f), photo_path }).select("id").single());
@@ -493,11 +576,16 @@ export async function addItem(boatId: string, locationId: string, containerId: s
 }
 
 export async function updateItem(item: Item, f: ItemFields, photo: Blob | null | undefined) {
+  if (await phoneBoat(item.id)) return changePhoneBoat(item.id, async s => {
+    const r = row(s.items, item.id);
+    Object.assign(r, { ...itemColumns(f), photo_path: await keepPhoto(s, r.photo_path, photo) });
+  });
   const photo_path = await replacePhoto(item.boatId, item.photoPath, photo);
   check(await supabase.from("items").update({ ...itemColumns(f), photo_path }).eq("id", item.id));
 }
 
 export async function deleteItem(item: Item) {
+  if (await phoneBoat(item.id)) return changePhoneBoat(item.id, s => dropItems(s, [item.id]));
   const docs = await docPathsForItems([item.id]);
   check(await supabase.from("items").delete().eq("id", item.id));
   await removePhotos([item.photoPath]);
@@ -532,7 +620,7 @@ async function uploadDocThumb(boatId: string, file: Blob, mime: string | null) {
  * Returns true if one was added.
  */
 export async function addMissingDocThumb(boatId: string, doc: ItemDocument) {
-  if (doc.thumbPath || !canThumb(doc.mimeType) || !navigator.onLine) return false;
+  if (doc.thumbPath || !canThumb(doc.mimeType) || !navigator.onLine || await phoneBoat(doc.id)) return false;
   const { data } = await supabase.storage.from(DOCUMENTS).download(doc.path);
   if (!data) return false;
   const thumb_path = await uploadDocThumb(boatId, data, doc.mimeType);
@@ -546,7 +634,7 @@ export async function listDocuments(itemId: string) {
   return readOr(async () => {
     const rows = check(await supabase.from("item_documents").select("*").eq("item_id", itemId).order("name"));
     return (rows as DocumentRow[]).map(toDocument);
-  }, async () => (await snapshots()).flatMap(s => s.documents).filter(d => d.item_id === itemId).sort(byName).map(toDocument));
+  }, async () => (await snapshots()).flatMap(s => s.documents).filter(d => d.item_id === itemId).sort(byName).map(toDocument), itemId);
 }
 
 export async function attachDocument(boatId: string, itemId: string, file: File) {
@@ -554,6 +642,14 @@ export async function attachDocument(boatId: string, itemId: string, file: File)
   const ext = /\.([a-z0-9]{1,8})$/i.exec(file.name)?.[1]?.toLowerCase();
   // Stored under a random name; the original file name is kept in the database for display.
   const path = `boats/${boatId}/docs/${itemId}/${crypto.randomUUID()}${ext ? `.${ext}` : ""}`;
+  if (await phoneBoat(boatId)) return changePhoneBoat(boatId, async s => {
+    await keepFile(DOCUMENTS, path, file);
+    const thumb = canThumb(file.type || null) ? await makeDocThumb(file, file.type || null) : null;
+    const thumb_path = thumb ? `boats/${boatId}/thumbs/${crypto.randomUUID()}.jpg` : null;
+    if (thumb && thumb_path) await keepFile(PHOTOS, thumb_path, thumb);
+    s.documents.push({ id: crypto.randomUUID(), item_id: itemId, name: file.name.slice(0, 255), path, size: file.size,
+      mime_type: file.type || null, thumb_path });
+  });
   check(await supabase.storage.from(DOCUMENTS).upload(path, file, { contentType: file.type || "application/octet-stream" }));
   const thumb_path = await uploadDocThumb(boatId, file, file.type || null);
   const { error } = await supabase.from("item_documents").insert({
@@ -566,6 +662,7 @@ export async function attachDocument(boatId: string, itemId: string, file: File)
 }
 
 export async function deleteDocument(doc: ItemDocument) {
+  if (await phoneBoat(doc.id)) return changePhoneBoat(doc.id, s => { s.documents = s.documents.filter(d => d.id !== doc.id); });
   check(await supabase.from("item_documents").delete().eq("id", doc.id));
   await removeDocs({ docs: [doc.path], thumbs: [doc.thumbPath] });
 }
@@ -609,15 +706,17 @@ const toInvite = (r: InviteRow): Invite => ({
 export async function myRoles(userId: string): Promise<Record<string, BoatRole>> {
   return readOr(async () => {
     const rows = check(await supabase.from("boat_members").select("boat_id, role").eq("user_id", userId)) as { boat_id: string; role: BoatRole }[];
-    return Object.fromEntries(rows.map(r => [r.boat_id, r.role]));
-  }, async () => Object.fromEntries((await snapshots()).map(s => [s.boatId, s.role])));
+    const mine = (await phoneBoats()).filter(s => s.boat.user_id === userId);
+    return { ...Object.fromEntries(rows.map(r => [r.boat_id, r.role])), ...Object.fromEntries(mine.map(s => [s.boatId, s.role])) };
+  }, async () => Object.fromEntries((await snapshots())
+    .filter(s => !s.phoneOnly || s.boat.user_id === userId).map(s => [s.boatId, s.role])));
 }
 
 export async function myRole(userId: string, boatId: string): Promise<BoatRole | null> {
   return readOr(async () => {
     const row = check(await supabase.from("boat_members").select("role").eq("boat_id", boatId).eq("user_id", userId).maybeSingle());
     return (row as { role: BoatRole } | null)?.role ?? null;
-  }, async () => (await snapshot(boatId))?.role ?? null);
+  }, async () => (await snapshot(boatId))?.role ?? null, boatId);
 }
 
 /** Everyone on a boat, owner first. */
@@ -625,7 +724,7 @@ export async function boatCrew(boatId: string): Promise<CrewMember[]> {
   return readOr(async () => {
     const rows = check(await supabase.rpc("boat_crew", { b: boatId })) as { user_id: string; email: string; role: BoatRole; joined_at: string }[];
     return rows.map(r => ({ userId: r.user_id, email: r.email, role: r.role, joinedAt: r.joined_at }));
-  }, async () => (await snapshot(boatId))?.crew ?? []);
+  }, async () => (await snapshot(boatId))?.crew ?? [], boatId);
 }
 
 export async function setCrewRole(boatId: string, userId: string, role: "crew" | "viewer") {
@@ -642,7 +741,7 @@ export async function pendingInvites(boatId: string) {
   return readOr(async () => {
     const rows = check(await supabase.from("boat_invites").select("*").eq("boat_id", boatId).is("accepted_at", null).order("created_at"));
     return (rows as InviteRow[]).map(toInvite);
-  }, async () => [] as Invite[]);
+  }, async () => [] as Invite[], boatId);
 }
 
 export async function createInvite(boatId: string, email: string, role: "crew" | "viewer") {
@@ -716,6 +815,8 @@ interface Snapshot {
   crew: CrewMember[];
   /** Storage keys of the files kept for this boat. */
   fileKeys: string[];
+  /** A phone-only boat: this is the boat itself, not a copy of one in the cloud. */
+  phoneOnly?: boolean;
 }
 
 const byName = <T extends { name: string }>(a: T, b: T) => a.name.localeCompare(b.name);
@@ -762,7 +863,7 @@ export async function offlineStatus(boatId: string): Promise<OfflineStatus | und
 
 /** When the newest saved copy was made (for the "offline" banner). */
 export async function lastSavedAt() {
-  const all = await snapshots();
+  const all = (await snapshots()).filter(s => !s.phoneOnly);
   return all.length ? Math.max(...all.map(s => s.savedAt)) : undefined;
 }
 
@@ -834,7 +935,7 @@ export async function saveBoatOffline(boatId: string, userId: string, options: O
   snap.fileKeys = wanted.map(([b, p]) => local.fileKey(b, p));
   await local.put("snapshots", snap);
   snapCache = null;
-  await pruneFiles();
+  await onPhone(pruneFiles);
 }
 
 /** Stop keeping a boat on this device and free the space. */
@@ -844,7 +945,7 @@ export async function removeBoatOffline(boatId: string) {
   setOfflineSettings(s);
   await local.remove("snapshots", boatId);
   snapCache = null;
-  await pruneFiles();
+  await onPhone(pruneFiles);
 }
 
 /** Delete saved files that no boat on this device uses any more. */
@@ -874,4 +975,117 @@ export function refreshOfflineBoats(userId: string) {
     } finally { refreshing = null; }
   })();
   return refreshing;
+}
+
+// ── Phone-only boats ────────────────────────────────────────────────────────
+// Chosen when a boat is added ("Only on this phone"). The boat lives in the same on-device database as the
+// offline copies, in the same shape, so the offline reads above show it. It never goes to the cloud,
+// so it can be changed with no signal — and is gone if this phone (or the browser's data) is.
+
+/** Device writes, one at a time, so a new photo is never cleared out before the boat that uses it is saved. */
+let phoneQueue: Promise<unknown> = Promise.resolve();
+function onPhone<T>(work: () => Promise<T>): Promise<T> {
+  const run = phoneQueue.then(work);
+  phoneQueue = run.catch(() => {});
+  return run;
+}
+
+/** Every boat kept only on this phone (any account). */
+async function phoneBoats() {
+  return (await snapshots()).filter(s => s.phoneOnly);
+}
+
+/** The phone-only boat that a boat, deck, location, container, item or document id belongs to, if any. */
+async function phoneBoat(id: string) {
+  return (await phoneBoats()).find(s => s.boatId === id ||
+    [s.decks, s.locations, s.containers, s.items, s.documents].some(rows => rows.some(r => r.id === id)));
+}
+
+export async function isPhoneOnly(boatId: string) {
+  return !!(await phoneBoat(boatId));
+}
+
+/** A row by id (it's there: the screens only offer what they've just read). */
+function row<T extends { id: string }>(rows: T[], id: string) {
+  const r = rows.find(x => x.id === id);
+  if (!r) throw new Error("That's no longer on this boat.");
+  return r;
+}
+
+async function keepFile(bucket: string, path: string, blob: Blob) {
+  await local.put<local.SavedFile>(FILES, { key: local.fileKey(bucket, path), blob, size: blob.size });
+}
+
+/** photo: a new Blob replaces the old one, null removes it, undefined leaves it alone. (Old files are cleared when the boat is saved.) */
+async function keepPhoto(s: Snapshot, oldPath: string | null, photo: Blob | null | undefined) {
+  if (photo === undefined) return oldPath;
+  if (!photo) return null;
+  const path = newPhotoPath(s.boatId, photo);
+  await keepFile(PHOTOS, path, photo);
+  return path;
+}
+
+/** Remove items and their documents. */
+function dropItems(s: Snapshot, itemIds: string[]) {
+  const ids = new Set(itemIds);
+  s.items = s.items.filter(i => !ids.has(i.id));
+  s.documents = s.documents.filter(d => !ids.has(d.item_id));
+}
+
+/** Remove locations and everything in them. */
+function dropLocations(s: Snapshot, locationIds: string[]) {
+  const ids = new Set(locationIds);
+  s.locations = s.locations.filter(l => !ids.has(l.id));
+  s.containers = s.containers.filter(c => !ids.has(c.location_id));
+  dropItems(s, s.items.filter(i => ids.has(i.location_id)).map(i => i.id));
+}
+
+async function savePhoneBoat(s: Snapshot) {
+  // Keep each item's document list (📎 count, search) in step with its documents.
+  for (const i of s.items) i.item_documents = s.documents.filter(d => d.item_id === i.id).map(d => ({ id: d.id, name: d.name }));
+  const photos = [s.boat.photo_path, ...s.decks.map(d => d.photo_path), ...s.locations.map(l => l.photo_path),
+    ...s.containers.map(c => c.photo_path), ...s.items.map(i => i.photo_path), ...s.documents.map(d => d.thumb_path)];
+  s.fileKeys = [
+    ...photos.filter((p): p is string => !!p).map(p => local.fileKey(PHOTOS, p)),
+    ...s.documents.map(d => local.fileKey(DOCUMENTS, d.path)),
+  ];
+  s.savedAt = Date.now();
+  await local.put("snapshots", s);
+  snapCache = null;
+  await pruneFiles(); // photos and documents nothing uses any more
+}
+
+/** Change a phone-only boat (found by the id of anything on it) and save it back to this phone. */
+function changePhoneBoat<T>(id: string, change: (s: Snapshot) => T | Promise<T>): Promise<T> {
+  return onPhone(async () => {
+    const found = await phoneBoat(id);
+    if (!found) throw new Error("This boat isn't on this phone any more.");
+    const s = structuredClone(found); // the saved copy stays as it was if anything goes wrong
+    const result = await change(s);
+    await savePhoneBoat(s);
+    return result;
+  });
+}
+
+function addPhoneBoat(name: string, photo: Blob | null, sortOrder: number, userId: string) {
+  // Ask the browser not to clear this data when space runs low (not all browsers allow it).
+  navigator.storage?.persist?.().catch(() => {});
+  return onPhone(async () => {
+    const id = crypto.randomUUID();
+    const s: Snapshot = {
+      boatId: id, savedAt: Date.now(), phoneOnly: true, role: "owner", crew: [], fileKeys: [],
+      boat: { id, user_id: userId, name: name.trim(), photo_path: null, sort_order: sortOrder },
+      decks: [], locations: [], containers: [], items: [], documents: [],
+    };
+    s.boat.photo_path = await keepPhoto(s, null, photo);
+    await savePhoneBoat(s);
+  });
+}
+
+function deletePhoneBoat(boatId: string) {
+  return onPhone(async () => {
+    await local.remove("snapshots", boatId);
+    snapCache = null;
+    await pruneFiles();
+  });
 }

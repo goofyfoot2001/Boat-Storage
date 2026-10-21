@@ -15,8 +15,8 @@ export function OfflineBanner() {
     <div className="offline-banner" role="status">
       <Icon name="wifi-off" size={16} />
       <span>
-        <strong>Offline</strong> — {saved ? `showing the copy saved on this device (${when(saved)})` : "no boats are saved on this device yet"}.
-        {" "}Changes need a connection.
+        <strong>Offline</strong> — {saved ? `showing the copy saved on this device (${when(saved)})` : "no cloud boats are saved on this device yet"}.
+        {" "}Changes need a connection, except on boats kept only on this phone.
       </span>
     </div>
   );
