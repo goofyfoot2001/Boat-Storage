@@ -7,6 +7,7 @@ import { ConfirmDelete } from "../components/ConfirmDelete";
 import { Icon } from "../components/Icon";
 import { NamePhotoForm } from "../components/NamePhotoForm";
 import { OfflineCard } from "../components/OfflineCard";
+import { usePhotoUrl } from "../components/usePhotoUrl";
 import * as store from "../data/store";
 import { useReloadOnReconnect } from "../lib/useOnline";
 import type { Boat, Deck } from "../data/types";
@@ -187,9 +188,12 @@ function DeckRow({ deck, reordering, isFirst, isLast, editable, onEdit, onMove }
   onEdit: () => void;
   onMove: (by: -1 | 1) => void;
 }) {
+  const photo = usePhotoUrl(deck.photoPath);
   const body = (
     <>
-      <div className="thumb deck-thumb"><Icon name="layers" size={20} /></div>
+      <div className={`thumb deck-photo${photo ? " has-photo" : ""}`}>
+        {photo ? <img src={photo} alt="" /> : <Icon name="layers" size={22} />}
+      </div>
       <div className="card-text">
         <h3>{deck.name}</h3>
         <p>{deck.photoPath ? plural(deck.locationCount, "location") : "No layout picture yet"}</p>
