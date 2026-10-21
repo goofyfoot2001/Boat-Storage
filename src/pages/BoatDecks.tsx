@@ -88,7 +88,17 @@ export function BoatDecks() {
           </Link>
         )}
 
-        {!reordering && (
+        {!reordering && boat.phoneOnly && (
+          <div className="card crew-link">
+            <span className="thumb deck-thumb saved"><Icon name="smartphone" size={20} /></span>
+            <span className="card-text">
+              <h3>Only on this phone</h3>
+              <p>Works with no signal. Not backed up or shared.</p>
+            </span>
+          </div>
+        )}
+
+        {!reordering && !boat.phoneOnly && (
           <Link to={`/boats/${boat.id}/crew`} className="card crew-link">
             <span className="thumb deck-thumb"><Icon name="users" size={20} /></span>
             <span className="card-text">
@@ -99,7 +109,7 @@ export function BoatDecks() {
           </Link>
         )}
 
-        {!reordering && <OfflineCard boatId={boat.id} boatName={boat.name} />}
+        {!reordering && !boat.phoneOnly && <OfflineCard boatId={boat.id} boatName={boat.name} />}
 
         <h2 className="section-title">Decks</h2>
         {reordering && <p className="hint">Use the arrows to change the order, then tap Done.</p>}

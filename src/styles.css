@@ -293,6 +293,8 @@ button.doc-open:active { background: #EEF3F8; }
 .role-option input { margin-top: 3px; accent-color: var(--tint); }
 .role-option span { display: flex; flex-direction: column; gap: 2px; }
 .role-option small { color: var(--text-2); font-size: 13px; }
+.role-option strong svg { vertical-align: -2px; margin-right: 4px; }
+.role-option.disabled { opacity: 0.55; cursor: default; }
 .invite-link { font-size: 13px; padding: 10px 12px; border-radius: 10px; background: #fff; border: 1px dashed var(--border); overflow-wrap: anywhere; color: var(--text-2); }
 .invite-card { display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; padding: 12px 14px; border-left: 5px solid var(--tint); }
 .invite-card > svg { color: var(--tint); flex: none; }

@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useState, type FormEvent, type ReactNode } from "react";
 import { Icon } from "./Icon";
 import { PhotoField } from "./PhotoField";
 import { Sheet } from "./Sheet";
@@ -15,6 +15,8 @@ interface Props {
   onSubmit: (name: string, photo: Blob | null | undefined) => Promise<void>;
   onClose: () => void;
   onDelete?: () => void;
+  /** More fields, shown under the picture. */
+  children?: ReactNode;
 }
 
 /** Add/edit form for a boat or deck: a name and an optional picture. */
@@ -48,6 +50,8 @@ export function NamePhotoForm(p: Props) {
 
         <PhotoField label={p.photoLabel} hint={p.photoHint} savedPath={p.initialPhotoPath}
           value={photo} onChange={v => { setPhoto(v); setError(""); }} onError={setError} />
+
+        {p.children}
 
         {error && <p className="error">{error}</p>}
 
