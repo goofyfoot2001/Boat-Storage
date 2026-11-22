@@ -1,4 +1,4 @@
-import { StrictMode, useEffect } from "react";
+import { StrictMode, Suspense, lazy, useEffect } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter, Navigate, Route, Routes, useLocation } from "react-router-dom";
 import { AuthProvider, useAuth } from "./auth";
@@ -17,6 +17,9 @@ import { startAutoUpdate } from "./lib/autoUpdate";
 import "./styles.css";
 
 startAutoUpdate();
+
+// The 3D view brings in a large graphics library, so it only downloads when opened.
+const Deck3D = lazy(() => import("./pages/Deck3D"));
 
 /** An invite opened before signing up (and confirming email) — pick it back up once signed in. */
 function pendingInvite() {
@@ -60,6 +63,7 @@ function App() {
       <Route path="/boats/:boatId/search" element={<SearchPage />} />
       <Route path="/boats/:boatId/crew" element={<CrewPage />} />
       <Route path="/decks/:deckId" element={<DeckPlan />} />
+      <Route path="/decks/:deckId/3d" element={<Suspense fallback={<p className="hint centered">Loading 3D view…</p>}><Deck3D /></Suspense>} />
       <Route path="/locations/:locationId" element={<LocationPage />} />
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

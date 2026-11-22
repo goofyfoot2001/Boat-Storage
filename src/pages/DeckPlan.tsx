@@ -11,6 +11,7 @@ import { useReloadOnReconnect } from "../lib/useOnline";
 import type { Boat, Deck, Location } from "../data/types";
 import { plural } from "../lib/format";
 import { useBoatRole } from "../lib/useBoatRole";
+import { has3DModel } from "../three/boatModels";
 
 /** The deck layout with its storage-location pins. Tap + or an empty spot to add a pin there. */
 export function DeckPlan() {
@@ -95,6 +96,12 @@ export function DeckPlan() {
                   ? "Tap a pin to see what's there. Pinch or use + / − to zoom."
                   : editable ? "Tap Add location, then tap the spot on the layout." : "No storage locations on this deck yet."}
               </p>
+            )}
+
+            {has3DModel(deck.id) && (
+              <Link className="btn block view-3d" to={`/decks/${deck.id}/3d`}>
+                <Icon name="box" size={18} /> View in 3D
+              </Link>
             )}
 
             <DeckLayout photoUrl={photo} alt={`${deck.name} layout`} locations={locations}
