@@ -95,7 +95,7 @@ export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pend
       <div className={`plan-frame${zoom.view.scale > 1 ? " zoomed" : ""}`} ref={zoom.frameRef}
         {...zoom.handlers}
         onPointerDown={e => { pointerType.current = e.pointerType; zoom.handlers.onPointerDown(e); }}>
-        <div ref={canvasRef} className={`plan-canvas${onTapSpot ? " can-add" : ""}`} onClick={tapPicture}
+        <div ref={canvasRef} className={`plan-canvas${onTapSpot ? " can-add" : ""}${currentId ? " has-current" : ""}`} onClick={tapPicture}
           style={{ transform: `translate(${zoom.view.x}px, ${zoom.view.y}px) scale(${zoom.view.scale})` }}>
           <img src={photoUrl} alt={alt} draggable={false} />
           {locations.map(loc => {
@@ -112,7 +112,11 @@ export function DeckLayout({ photoUrl, alt, locations, currentId, movingId, pend
               loc.id === currentId && "is-current",
             ].filter(Boolean).join(" ")}
               style={{ left: `${at.x * 100}%`, top: `${at.y * 100}%`, transform: inverse }}>
-              {loc.id === currentId && <span className="pin-glow" style={{ background: loc.color }} aria-hidden="true" />}
+              {loc.id === currentId && <>
+                <span className="pin-glow" style={{ background: loc.color }} aria-hidden="true" />
+                <span className="pin-ripple" style={{ color: loc.color }} aria-hidden="true" />
+                <span className="pin-ripple pin-ripple-late" style={{ color: loc.color }} aria-hidden="true" />
+              </>}
               <button className="dot" style={{ background: loc.color }}
                 aria-label={`${loc.name}, ${plural(loc.itemCount, "item")}${loc.id === currentId ? " (you are here)" : ""}${isMoving ? " (drag to move)" : ""}`}
                 {...(isMoving && onDropPin ? dragHandlers : {
