@@ -171,6 +171,8 @@ a.row-card-main:active { background: #EEF3F8; }
 .dot-label-name { overflow: hidden; text-overflow: ellipsis; }
 .dot-label-count { font-weight: 400; opacity: 0.7; font-size: 12px; }
 .label-below .dot-label { bottom: auto; top: 13px; }
+.is-current .dot-label { bottom: 20px; }
+.is-current.label-below .dot-label { bottom: auto; top: 20px; }
 .label-start .dot-label { transform: translateX(-16px); }
 .label-end .dot-label { transform: translateX(calc(-100% + 16px)); }
 
@@ -184,24 +186,46 @@ a.row-card-main:active { background: #EEF3F8; }
 .muted { color: var(--muted); font-size: 13px; font-weight: 400; }
 
 /* The pin for the location you're looking at */
-/* The pin for the location you're on gently "breathes": a slow swell plus a soft glow in its own color. */
+/* The pin for the location you're on (e.g. an item you searched for) stands out:
+   it's bigger, has a thick white ring, swells, and sends out "sonar" ripples in its own color.
+   The other pins fade back a little so it's easy to spot at a glance. */
+.has-current .dot-wrap:not(.is-current) .dot { opacity: 0.55; }
+.has-current .dot-wrap:not(.is-current):hover .dot,
+.has-current .dot-wrap:not(.is-current):focus-within .dot { opacity: 1; }
 .is-current { z-index: 2; }
-.is-current .dot { -webkit-animation: breathe 2.4s ease-in-out infinite; animation: breathe 2.4s ease-in-out infinite; }
-/* The glow is its own element under the pin (drawn first), which phone browsers handle reliably. */
-.pin-glow {
-  position: absolute; left: -7.5px; top: -7.5px; width: 15px; height: 15px; border-radius: 50%;
-  pointer-events: none; opacity: 0;
-  -webkit-animation: glow 2.4s ease-in-out infinite; animation: glow 2.4s ease-in-out infinite;
+.is-current .dot {
+  left: -11px; top: -11px; width: 22px; height: 22px;
+  border: 3px solid #fff;
+  box-shadow: 0 0 0 1.5px rgb(0 0 0 / 0.55), 0 2px 8px rgb(0 0 0 / 0.5);
+  -webkit-animation: breathe 1.6s ease-in-out infinite; animation: breathe 1.6s ease-in-out infinite;
 }
-@-webkit-keyframes breathe { 50% { -webkit-transform: scale(1.12); transform: scale(1.12); } }
-@keyframes breathe { 50% { transform: scale(1.12); } }
-@-webkit-keyframes glow { 0%, 100% { -webkit-transform: scale(1); opacity: 0; } 50% { -webkit-transform: scale(1.8); opacity: 0.35; } }
-@keyframes glow { 0%, 100% { transform: scale(1); opacity: 0; } 50% { transform: scale(1.8); opacity: 0.35; } }
-/* "Reduce motion" / power saving: no growing, just a soft glow fading in and out. */
-@keyframes glow-fade { 0%, 100% { opacity: 0.1; } 50% { opacity: 0.4; } }
+/* The glow and ripples are their own elements under the pin (drawn first), which phone browsers handle reliably. */
+.pin-glow, .pin-ripple {
+  position: absolute; left: -11px; top: -11px; width: 22px; height: 22px; border-radius: 50%;
+  pointer-events: none; box-sizing: border-box;
+}
+.pin-glow { opacity: 0; -webkit-animation: glow 1.6s ease-in-out infinite; animation: glow 1.6s ease-in-out infinite; }
+/* A ring in the pin's color with a thin white edge, so it shows on dark and light pictures alike. */
+.pin-ripple {
+  border: 3px solid currentColor;
+  box-shadow: 0 0 0 1px rgb(255 255 255 / 0.85), inset 0 0 0 1px rgb(255 255 255 / 0.85);
+  opacity: 0;
+  -webkit-animation: ripple 1.8s ease-out infinite; animation: ripple 1.8s ease-out infinite;
+}
+.pin-ripple-late { -webkit-animation-delay: 0.9s; animation-delay: 0.9s; }
+@-webkit-keyframes breathe { 50% { -webkit-transform: scale(1.3); transform: scale(1.3); } }
+@keyframes breathe { 50% { transform: scale(1.3); } }
+@-webkit-keyframes glow { 0%, 100% { -webkit-transform: scale(1.2); opacity: 0.15; } 50% { -webkit-transform: scale(2.4); opacity: 0.5; } }
+@keyframes glow { 0%, 100% { transform: scale(1.2); opacity: 0.15; } 50% { transform: scale(2.4); opacity: 0.5; } }
+@-webkit-keyframes ripple { 0% { -webkit-transform: scale(1); opacity: 0.95; } 100% { -webkit-transform: scale(4); opacity: 0; } }
+@keyframes ripple { 0% { transform: scale(1); opacity: 0.95; } 100% { transform: scale(4); opacity: 0; } }
+/* "Reduce motion" / power saving: no growing, just a steady ring and a soft glow fading in and out. */
+@keyframes glow-fade { 0%, 100% { opacity: 0.2; } 50% { opacity: 0.55; } }
 @media (prefers-reduced-motion: reduce) {
   .is-current .dot { animation: none; }
-  .pin-glow { transform: scale(1.8); animation: glow-fade 2.4s ease-in-out infinite; }
+  .pin-glow { transform: scale(2.2); animation: glow-fade 1.6s ease-in-out infinite; }
+  .pin-ripple { animation: none; opacity: 1; transform: scale(1.8); }
+  .pin-ripple-late { display: none; }
 }
 .plan-canvas:not(.can-add) { cursor: default; }
 
