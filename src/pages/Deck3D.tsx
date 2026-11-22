@@ -9,6 +9,12 @@ import { plural } from "../lib/format";
 import { useReloadOnReconnect } from "../lib/useOnline";
 import { has3DModel } from "../three/boatModels";
 import { SaloonScene, type ViewName } from "../three/saloonScene";
+import { ShipSounds } from "../three/shipSounds";
+
+const SOUND_KEY = "deck3d-sound";
+function soundPref() {
+  try { return localStorage.getItem(SOUND_KEY) !== "off"; } catch { return true; }
+}
 
 /** Walk-around 3D model of a deck, with its storage pins. Loaded only when opened. */
 export default function Deck3D() {
@@ -21,6 +27,8 @@ export default function Deck3D() {
   const [names, setNames] = useState(false);
   const [plan, setPlan] = useState(false);
   const [failed, setFailed] = useState(false);
+  const [sound, setSound] = useState(soundPref);
+  const sounds = useRef<ShipSounds | null>(null);
   const holder = useRef<HTMLDivElement>(null);
   const sceneRef = useRef<SaloonScene | null>(null);
   const photo = usePhotoUrl(deck?.photoPath);
@@ -45,6 +53,7 @@ export default function Deck3D() {
       return;
     }
     scene.onSelect = setSelected;
+    scene.onRollPeak = strength => sounds.current?.rollPeak(strength);
     sceneRef.current = scene;
     return () => { scene.dispose(); sceneRef.current = null; };
   }, [ready]);
@@ -59,6 +68,23 @@ export default function Deck3D() {
   }, [locations, ready]);
 
   useEffect(() => { sceneRef.current?.setShowNames(names); }, [names, ready]);
+
+  // Ship sounds: browsers only allow audio after a tap, so they start with the first touch on the page.
+  useEffect(() => {
+    try { localStorage.setItem(SOUND_KEY, sound ? "on" : "off"); } catch { /* private mode */ }
+    if (!sound) return;
+    const s = (sounds.current ??= new ShipSounds());
+    const start = () => s.start();
+    const onHide = () => (document.hidden ? s.pause() : s.start());
+    document.addEventListener("pointerdown", start, true);
+    document.addEventListener("visibilitychange", onHide);
+    return () => {
+      document.removeEventListener("pointerdown", start, true);
+      document.removeEventListener("visibilitychange", onHide);
+      s.stop();
+      sounds.current = null;
+    };
+  }, [sound]);
   useEffect(() => { sceneRef.current?.setPlanPicture(plan ? photo ?? null : null); }, [plan, photo, ready]);
 
   if (deck === null || (deck && !has3DModel(deck.id))) return <Navigate to={deckId ? `/decks/${deckId}` : "/"} replace />;
@@ -78,6 +104,7 @@ export default function Deck3D() {
             <button key={v} className={view === v ? "on" : ""} onClick={() => choose(v)}>{label}</button>
           ))}
         </div>
+        <label className="toggle"><input type="checkbox" checked={sound} onChange={e => setSound(e.target.checked)} /> Sound</label>
         <label className="toggle"><input type="checkbox" checked={names} onChange={e => setNames(e.target.checked)} /> Names</label>
         {photo && <label className="toggle"><input type="checkbox" checked={plan} onChange={e => setPlan(e.target.checked)} /> Plan on floor</label>}
       </div>
