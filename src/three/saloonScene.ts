@@ -1,5 +1,13 @@
 import * as THREE from "three";
 import { OrbitControls } from "three/examples/jsm/controls/OrbitControls.js";
+import berthUrl from "./textures/berth.jpg";
+import counterUrl from "./textures/counter.jpg";
+import fabricUrl from "./textures/fabric.jpg";
+import knitUrl from "./textures/knit.jpg";
+import plaidUrl from "./textures/plaid.jpg";
+import rugUrl from "./textures/rug.jpg";
+import soleUrl from "./textures/sole.jpg";
+import teakUrl from "./textures/teak.jpg";
 
 /**
  * A 3D model of MoonlightLady's main deck (saloon, galley, head, forward and aft cabins),
@@ -78,93 +86,31 @@ function canvasTexture(w: number, h: number, draw: (c: CanvasRenderingContext2D)
   return tex;
 }
 
-function seeded(seed: number) {
-  return () => ((seed = (seed * 16807) % 2147483647) / 2147483647);
+/**
+ * Swatches cut from the owner's photos of the boat (teak, settee fabric, rug, sole, cushions…).
+ * Geometry UVs are in metres, so `tile` is how many metres one copy of the swatch covers.
+ * Mirrored repeats hide the seams between copies.
+ */
+function photoTexture(url: string, tile: number) {
+  const tex = new THREE.TextureLoader().load(url);
+  tex.colorSpace = THREE.SRGBColorSpace;
+  tex.anisotropy = 8;
+  tex.wrapS = tex.wrapT = THREE.MirroredRepeatWrapping;
+  tex.repeat.set(1 / tile, 1 / tile);
+  return tex;
 }
 
-function teakTexture() {
-  const rnd = seeded(7);
-  return canvasTexture(256, 256, c => {
-    c.fillStyle = "#a8582a";
-    c.fillRect(0, 0, 256, 256);
-    for (let i = 0; i < 90; i++) {
-      const x = rnd() * 256;
-      c.strokeStyle = `rgba(${rnd() < 0.5 ? "70,28,8" : "205,120,60"},${0.12 + rnd() * 0.2})`;
-      c.lineWidth = 0.5 + rnd() * 2.5;
-      c.beginPath();
-      c.moveTo(x, 0);
-      c.bezierCurveTo(x + rnd() * 8 - 4, 85, x + rnd() * 8 - 4, 170, x + rnd() * 6 - 3, 256);
-      c.stroke();
-    }
-  }, [1, 1]);
-}
-
-/** Teak planks with thin holly (cream) strips, like the cabin sole. */
-function soleTexture() {
-  const rnd = seeded(3);
-  return canvasTexture(512, 512, c => {
-    const strip = 512 / 8;
-    for (let i = 0; i < 8; i++) {
-      const tone = 150 + rnd() * 30;
-      c.fillStyle = `rgb(${tone},${tone * 0.6},${tone * 0.33})`;
-      c.fillRect(0, i * strip, 512, strip);
-      for (let g = 0; g < 14; g++) {
-        c.strokeStyle = `rgba(60,25,8,${0.08 + rnd() * 0.12})`;
-        c.lineWidth = 1 + rnd() * 2;
-        const y = i * strip + rnd() * strip;
-        c.beginPath();
-        c.moveTo(0, y);
-        c.bezierCurveTo(170, y + rnd() * 6 - 3, 340, y + rnd() * 6 - 3, 512, y);
-        c.stroke();
-      }
-      c.fillStyle = "#e9dcc0";
-      c.fillRect(0, i * strip, 512, 5);
-    }
-  }, [6, 5]);
-}
-
-function fabricTexture(base: string, fleck: string) {
-  const rnd = seeded(11);
-  return canvasTexture(128, 128, c => {
-    c.fillStyle = base;
-    c.fillRect(0, 0, 128, 128);
-    for (let i = 0; i < 900; i++) {
-      c.fillStyle = fleck;
-      c.globalAlpha = rnd() * 0.18;
-      c.fillRect(rnd() * 128, rnd() * 128, 2, 2);
-    }
-  }, [2, 2]);
-}
-
-/** Navy rug with a white diamond lattice. */
-function rugTexture() {
-  return canvasTexture(256, 256, c => {
-    c.fillStyle = "#1f2f63";
-    c.fillRect(0, 0, 256, 256);
-    c.strokeStyle = "#e8ecf4";
-    c.lineWidth = 7;
-    for (let i = -256; i < 512; i += 64) {
-      c.beginPath(); c.moveTo(i, 0); c.lineTo(i + 256, 256); c.stroke();
-      c.beginPath(); c.moveTo(i + 256, 0); c.lineTo(i, 256); c.stroke();
-    }
-    c.lineWidth = 14;
-    c.strokeRect(0, 0, 256, 256);
-  });
-}
-
-/** White berth cushions with a dark leafy pattern. */
-function berthTexture() {
-  const rnd = seeded(5);
-  return canvasTexture(256, 256, c => {
-    c.fillStyle = "#f1efe9";
-    c.fillRect(0, 0, 256, 256);
-    c.fillStyle = "#3b4150";
-    for (let i = 0; i < 160; i++) {
-      c.beginPath();
-      c.ellipse(rnd() * 256, rnd() * 256, 3 + rnd() * 5, 1.5 + rnd() * 2, rnd() * Math.PI, 0, Math.PI * 2);
-      c.fill();
-    }
-  }, [3, 3]);
+/** Give a box UVs in metres on every face, so textures keep their real size instead of stretching. */
+function metreUVs(geo: THREE.BoxGeometry, w: number, h: number, d: number) {
+  const uv = geo.getAttribute("uv") as THREE.BufferAttribute;
+  // Faces in order: +x, -x, +y, -y, +z, -z (4 corners each).
+  const sizes: [number, number][] = [[d, h], [d, h], [w, d], [w, d], [w, h], [w, h]];
+  for (let i = 0; i < uv.count; i++) {
+    const [su, sv] = sizes[Math.floor(i / 4)];
+    uv.setXY(i, uv.getX(i) * su, uv.getY(i) * sv);
+  }
+  uv.needsUpdate = true;
+  return geo;
 }
 
 /** Breaker panel: dark board with rows of switches. */
@@ -202,6 +148,12 @@ export class SaloonScene {
   private resizeObserver: ResizeObserver;
   private down: { x: number; y: number } | null = null;
   onSelect: (id: string | null) => void = () => {};
+  /** The boat reached the end of a roll (strength 0–1): a good moment for a creak. */
+  onRollPeak: (strength: number) => void = () => {};
+  private lastRoll = 0;
+  private rollingUp = true;
+  /** Gentle rolling at the dock; off for people who've asked their device for less motion. */
+  private rocking = !window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 
   constructor(private container: HTMLElement) {
     this.renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -238,23 +190,23 @@ export class SaloonScene {
 
   // ── Materials and helpers ────────────────────────────────────────────────────────────────
 
-  private teakTex = this.keep(teakTexture());
+  private teakTex = this.keep(photoTexture(teakUrl, 0.35));
   private mat = {
     teak: this.keep(new THREE.MeshStandardMaterial({ map: this.teakTex, roughness: 0.38, metalness: 0.05 })),
     teakDark: this.keep(new THREE.MeshStandardMaterial({ color: "#7a3e1c", roughness: 0.45 })),
     liner: this.keep(new THREE.MeshStandardMaterial({ color: "#f2efe8", roughness: 0.55 })),
     ceiling: this.keep(new THREE.MeshStandardMaterial({ color: "#f4f2ec", roughness: 0.7 })),
-    sole: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(soleTexture()), roughness: 0.35 })),
-    blue: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(fabricTexture("#1f46a8", "#0b1a4a")), roughness: 0.95 })),
-    pillowWhite: this.keep(new THREE.MeshStandardMaterial({ color: "#e4e2dc", roughness: 1 })),
-    pillowBlue: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(fabricTexture("#3a4f86", "#d8deea")), roughness: 1 })),
+    sole: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(soleUrl, 0.6)), roughness: 0.35 })),
+    blue: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(fabricUrl, 0.5)), roughness: 0.95 })),
+    pillowWhite: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(knitUrl, 0.2)), roughness: 1 })),
+    pillowBlue: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(plaidUrl, 0.18)), roughness: 1 })),
     pillowGrey: this.keep(new THREE.MeshStandardMaterial({ color: "#5d6577", roughness: 1 })),
-    counter: this.keep(new THREE.MeshStandardMaterial({ color: "#ece6d4", roughness: 0.5 })),
+    counter: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(counterUrl, 0.4)), roughness: 0.5 })),
     steel: this.keep(new THREE.MeshStandardMaterial({ color: "#b9bec6", roughness: 0.3, metalness: 0.85 })),
     darkSteel: this.keep(new THREE.MeshStandardMaterial({ color: "#3a3f47", roughness: 0.5, metalness: 0.6 })),
     kettle: this.keep(new THREE.MeshStandardMaterial({ color: "#1fa5a8", roughness: 0.3, metalness: 0.2 })),
-    rug: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(rugTexture()), roughness: 1 })),
-    berth: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(berthTexture()), roughness: 1 })),
+    rug: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(rugUrl, 0.4)), roughness: 1 })),
+    berth: this.keep(new THREE.MeshStandardMaterial({ map: this.keep(photoTexture(berthUrl, 0.3)), roughness: 1 })),
     glassLight: this.keep(new THREE.MeshStandardMaterial({ color: "#dfeefa", emissive: "#bcd9f2", emissiveIntensity: 0.75 })),
     curtain: this.keep(new THREE.MeshStandardMaterial({ color: "#1d4fb8", roughness: 0.9 })),
     domeLight: this.keep(new THREE.MeshStandardMaterial({ color: "#ffffff", emissive: "#fff4dc", emissiveIntensity: 0.8 })),
@@ -272,7 +224,8 @@ export class SaloonScene {
 
   /** A box between two u's, two v's and two heights. */
   private box(u0: number, u1: number, v0: number, v1: number, y0: number, y1: number, mat: THREE.Material, parent: THREE.Object3D = this.scene) {
-    const geo = this.keep(new THREE.BoxGeometry(Math.abs(X(u1) - X(u0)), y1 - y0, Math.abs(Z(v1) - Z(v0))));
+    const w = Math.abs(X(u1) - X(u0)), d = Math.abs(Z(v1) - Z(v0));
+    const geo = this.keep(metreUVs(new THREE.BoxGeometry(w, y1 - y0, d), w, y1 - y0, d));
     const mesh = new THREE.Mesh(geo, mat);
     mesh.position.set((X(u0) + X(u1)) / 2, (y0 + y1) / 2, (Z(v0) + Z(v1)) / 2);
     parent.add(mesh);
@@ -318,7 +271,7 @@ export class SaloonScene {
         const rows = PROFILE.slice(a, b + 1);
         us.forEach((u, i) => rows.forEach(([h, f], j) => {
           pos.push(X(u), h, Z(0.5 + side * f * halfBeam(u)));
-          uv.push(X(u) / 1.2, h / 1.2);
+          uv.push(X(u), h);
           if (i < N && j < rows.length - 1) {
             const c = i * rows.length + j, n = c + rows.length;
             // Faces point inwards, so the walls vanish when you look in from outside.
@@ -365,7 +318,7 @@ export class SaloonScene {
     us.forEach((u, i) => {
       const hb = factor * halfBeam(u);
       pos.push(X(u), h, Z(0.5 - hb), X(u), h, Z(0.5 + hb));
-      uv.push(u, 0.5 - hb, u, 0.5 + hb);
+      uv.push(X(u), Z(0.5 - hb), X(u), Z(0.5 + hb));
       if (i < us.length - 1) {
         const p = i * 2, s = p + 1, np = p + 2, ns = p + 3;
         if (up) idx.push(p, s, np, s, ns, np);
@@ -452,7 +405,7 @@ export class SaloonScene {
     this.box(0.546, 0.554, 0.44, 0.525, 0.4, 0.72, m.teak);
 
     // Throw pillows.
-    const pillowGeo = this.keep(new THREE.BoxGeometry(0.4, 0.38, 0.12));
+    const pillowGeo = this.keep(metreUVs(new THREE.BoxGeometry(0.4, 0.38, 0.12), 0.4, 0.38, 0.12));
     const pillow = (u: number, v: number, h: number, mat: THREE.Material, rot = 0) => {
       const p = new THREE.Mesh(pillowGeo, mat);
       p.position.set(X(u), h + 0.17, Z(v));
@@ -822,6 +775,7 @@ export class SaloonScene {
       if (f.t >= 1) this.flight = null;
     }
     this.controls.update();
+    this.rock();
     // Looking down from above the cabin: lift the lid off.
     this.overhead.visible = this.camera.position.y < CEILING - 0.02;
     // The selected pin pulses so it's easy to spot.
@@ -833,6 +787,20 @@ export class SaloonScene {
     }
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Roll the cabin a degree or so each way, with a slower pitch, like a boat at the dock. */
+  private rock() {
+    const t = this.clock.elapsedTime;
+    const roll = 0.02 * Math.sin((t * 2 * Math.PI) / 6.5) + 0.006 * Math.sin((t * 2 * Math.PI) / 2.9 + 1);
+    const up = roll > this.lastRoll;
+    if (up !== this.rollingUp) this.onRollPeak(Math.min(1, Math.abs(roll) / 0.026));
+    this.rollingUp = up;
+    this.lastRoll = roll;
+    if (this.rocking) {
+      this.scene.rotation.x = roll;
+      this.scene.rotation.z = 0.006 * Math.sin((t * 2 * Math.PI) / 8.3);
+    }
+  }
 
   private onPointerDown = (e: PointerEvent) => {
     this.down = { x: e.clientX, y: e.clientY };
